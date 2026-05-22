@@ -37,11 +37,11 @@ def load_districts(data_dir: Path | None = None) -> dict[str, BaseGeometry]:
 
 def assign_district(
     lat: float, lng: float, districts: dict[str, BaseGeometry]
-) -> str | None:
+) -> str:
     """Ordnet einen Punkt per Punkt-in-Polygon einem district_slug zu.
-    Liegt der Punkt in keinem Polygon, wird None zurückgegeben."""
+    Liegt der Punkt in keinem Polygon, wird 'unassigned' zurückgegeben."""
     point = Point(lng, lat)  # GeoJSON-Reihenfolge ist (lng, lat)
     for slug, geometry in districts.items():
         if geometry.contains(point):
             return slug
-    return None
+    return "unassigned"

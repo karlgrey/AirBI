@@ -19,9 +19,9 @@ def test_point_inside_polygon_is_assigned():
     assert assign_district(0.0, 0.0, districts) == "testdistrict"
 
 
-def test_point_outside_polygon_returns_none():
+def test_point_outside_polygon_returns_unassigned():
     districts = load_districts(FIXTURE_DIR)
-    assert assign_district(5.0, 5.0, districts) is None
+    assert assign_district(5.0, 5.0, districts) == "unassigned"
 
 
 def test_real_marvila_polygon_contains_target_object():

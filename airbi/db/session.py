@@ -1,4 +1,4 @@
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from airbi.config import settings
@@ -13,7 +13,7 @@ def make_engine(url: str | None = None) -> Engine:
     return create_engine(url or settings.database_url, future=True)
 
 
-def make_session_factory(bind) -> sessionmaker:
+def make_session_factory(bind: Engine | Connection) -> sessionmaker:
     """Erzeugt eine Session-Factory, gebunden an Engine oder Connection."""
     return sessionmaker(bind=bind, autoflush=False, expire_on_commit=False)
 
