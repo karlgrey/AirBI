@@ -362,10 +362,14 @@ def run_search_crawl(
                     page_idx, len(page_results), new_count, len(parsed_listings),
                 )
 
-            # --- Entire-Home-Filter ---
-            filtered = [pl for pl in parsed_listings.values() if is_entire_home(pl)]
+            # --- Entire-Home-Filter + District-Vorfilter ---
+            filtered = [
+                pl for pl in parsed_listings.values()
+                if is_entire_home(pl)
+                and assign_district(pl.lat, pl.lng, relevant) != "unassigned"
+            ]
             logger.info(
-                "Suchergebnisse: %d total (alle Seiten), %d nach Entire-Home-Filter",
+                "Suchergebnisse: %d total (alle Seiten), %d nach Entire-Home- + District-Filter",
                 len(parsed_listings),
                 len(filtered),
             )
