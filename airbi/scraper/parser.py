@@ -225,9 +225,9 @@ def parse_listing_detail(payload: dict) -> ListingDetail:
                     bedrooms = int(m.group(1))
                     continue
 
-            # beds: "1 bed" (but NOT "1 bedroom")
+            # beds: "1 bed" / "2 beds" (but NOT "1 bedroom")
             if beds is None:
-                m = re.match(r"^(\d+)\s+bed\b", title, re.IGNORECASE)
+                m = re.match(r"^(\d+)\s+beds?\b", title, re.IGNORECASE)
                 if m:
                     beds = int(m.group(1))
                     continue

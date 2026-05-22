@@ -96,9 +96,60 @@ def _detail_payload():
 
 def test_detail_parser_extracts_room_counts():
     detail = parse_listing_detail(_detail_payload())
-    assert detail.bedrooms is not None
-    assert detail.bedrooms >= 0
-    assert detail.max_guests is not None and detail.max_guests >= 1
+    assert detail.bedrooms == 1
+    assert detail.beds == 1
+    assert detail.bathrooms == 1.0
+    assert detail.max_guests == 2
+
+
+def _detail_payload_with_overview(items: list) -> dict:
+    """Minimaler Payload, der die exakte Verschachtelung nachbildet,
+    die _collect_overview_items erwartet."""
+    section = {"sectionData": {"overviewItems": items}}
+    return {
+        "niobeClientData": [
+            [
+                None,
+                {
+                    "data": {
+                        "presentation": {
+                            "stayProductDetailPage": {
+                                "sections": {
+                                    "sbuiData": {
+                                        "sectionConfiguration": {
+                                            "root": {
+                                                "sections": [section]
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            ]
+        ]
+    }
+
+
+def test_detail_parser_handles_plural_and_studio():
+    # Plural-Titel ("3 bedrooms", "2 beds", "2.5 baths", "4 guests")
+    payload = _detail_payload_with_overview([
+        {"title": "4 guests"}, {"title": "3 bedrooms"},
+        {"title": "2 beds"}, {"title": "2.5 baths"},
+    ])
+    detail = parse_listing_detail(payload)
+    assert detail.bedrooms == 3
+    assert detail.beds == 2
+    assert detail.bathrooms == 2.5
+    assert detail.max_guests == 4
+
+
+def test_detail_parser_studio_is_zero_bedrooms():
+    payload = _detail_payload_with_overview([
+        {"title": "2 guests"}, {"title": "Studio"}, {"title": "1 bed"},
+    ])
+    assert parse_listing_detail(payload).bedrooms == 0
 
 
 def test_detail_parser_tolerates_unexpected_shape():
