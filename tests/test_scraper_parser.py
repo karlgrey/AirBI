@@ -73,3 +73,15 @@ def test_search_parser_extracts_property_type_and_url():
 
 def test_search_parser_returns_empty_list_on_unexpected_shape():
     assert parse_search_results({}) == []
+
+
+def test_price_helper_handles_thousands_and_decimal_separators():
+    from airbi.scraper.parser import _parse_price
+    from decimal import Decimal
+    assert _parse_price("€ 817") == Decimal("817")
+    assert _parse_price("€1,234") == Decimal("1234")
+    assert _parse_price("€1,234.56") == Decimal("1234.56")
+    assert _parse_price("€1.234,56") == Decimal("1234.56")
+    assert _parse_price("€1.234") == Decimal("1234")
+    assert _parse_price("") is None
+    assert _parse_price(None) is None

@@ -43,24 +43,24 @@ def _decode_listing_id(raw_id: str | None) -> str | None:
 
 
 def _parse_price(price_str: str | None) -> Decimal | None:
-    """Extrahiert die erste Zahl (mit optionalem Dezimaltrenner) aus einem
-    formatierten Preisstring wie ``"€ 817"`` oder ``"$ 1,234.56"``."""
+    """Extrahiert einen Decimal-Preis aus einem formatierten String.
+    Erkennt das Dezimaltrennzeichen als ein '.' oder ',', das von genau
+    zwei Ziffern am Ende gefolgt wird; alle anderen '.'/',' sind
+    Tausendertrennzeichen."""
     if not price_str:
         return None
-    # Entferne alle Nicht-Ziffern außer Punkt und Komma, dann normalisiere
-    match = re.search(r"[\d]+(?:[.,]\d+)*", price_str.replace(" ", ""))
-    if not match:
+    digits = re.sub(r"[^\d.,]", "", price_str)
+    if not digits:
         return None
-    # Normalisiere: deutsches Format "1.234,56" → "1234.56", oder "1,234.56" → "1234.56"
-    raw = match.group(0)
-    # Wenn Komma als Dezimaltrenner (kein Punkt nach Komma), ersetze Komma durch Punkt
-    if "," in raw and "." not in raw:
-        raw = raw.replace(",", ".")
+    m = re.search(r"[.,](\d{2})$", digits)
+    if m:
+        decimals = m.group(1)
+        integer = re.sub(r"[.,]", "", digits[: m.start()])
+        normalized = f"{integer or '0'}.{decimals}"
     else:
-        # Tausendertrennzeichen entfernen
-        raw = raw.replace(",", "")
+        normalized = re.sub(r"[.,]", "", digits)
     try:
-        return Decimal(raw)
+        return Decimal(normalized) if normalized else None
     except InvalidOperation:
         return None
 
