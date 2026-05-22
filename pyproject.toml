@@ -9,8 +9,12 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "shapely>=2.0",
     "pydantic-settings>=2.0",
+    "playwright>=1.40",
 ]
-# Plan 2 ergänzt hier playwright; Plan 3 ergänzt fastapi/uvicorn/jinja2.
+# Plan 3 ergänzt hier fastapi/uvicorn/jinja2.
+
+[project.scripts]
+airbi = "airbi.cli:main"
 
 [dependency-groups]
 dev = [
