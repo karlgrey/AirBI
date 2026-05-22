@@ -3,7 +3,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from airbi.scraper.models import ParsedListing
-from airbi.scraper.parser import parse_search_results
+from airbi.scraper.parser import parse_listing_detail, parse_search_results
 
 
 def test_parsed_listing_holds_listing_and_snapshot_fields():
@@ -85,3 +85,23 @@ def test_price_helper_handles_thousands_and_decimal_separators():
     assert _parse_price("€1.234") == Decimal("1234")
     assert _parse_price("") is None
     assert _parse_price(None) is None
+
+
+DETAIL_FIXTURE = Path(__file__).parent / "fixtures" / "scraper" / "listing_detail.json"
+
+
+def _detail_payload():
+    return json.loads(DETAIL_FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_detail_parser_extracts_room_counts():
+    detail = parse_listing_detail(_detail_payload())
+    assert detail.bedrooms is not None
+    assert detail.bedrooms >= 0
+    assert detail.max_guests is not None and detail.max_guests >= 1
+
+
+def test_detail_parser_tolerates_unexpected_shape():
+    detail = parse_listing_detail({})
+    assert detail.bedrooms is None
+    assert detail.max_guests is None

@@ -27,3 +27,14 @@ class ParsedListing:
     review_count: int
     rating: float | None
     search_position: int | None
+
+
+@dataclass
+class ListingDetail:
+    """Aus der Airbnb-Detailseite extrahierte Raumzahlen (minimaler
+    Detail-Crawl). Wird vom Orchestrator in ein ParsedListing gemergt."""
+
+    bedrooms: int | None
+    beds: int | None
+    bathrooms: float | None
+    max_guests: int | None

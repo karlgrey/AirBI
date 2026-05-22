@@ -14,7 +14,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from airbi.scraper.models import ParsedListing
+from airbi.scraper.models import ListingDetail, ParsedListing
 
 
 def _dig(obj: Any, *keys: str) -> Any:
@@ -148,6 +148,118 @@ def _parse_result(r: dict, position: int) -> ParsedListing | None:
         review_count=review_count,
         rating=rating,
         search_position=position,
+    )
+
+
+def _collect_overview_items(payload: dict) -> list[dict]:
+    """Durchsucht alle Sections in sbuiData nach overviewItems-Listen und
+    gibt eine flache Liste aller gefundenen Items zurück."""
+    items: list[dict] = []
+    try:
+        sc_sections = (
+            payload["niobeClientData"][0][1]["data"]
+            ["presentation"]["stayProductDetailPage"]["sections"]
+            ["sbuiData"]["sectionConfiguration"]["root"]["sections"]
+        )
+    except (KeyError, IndexError, TypeError):
+        return items
+    if not isinstance(sc_sections, list):
+        return items
+    for section in sc_sections:
+        section_data = _dig(section, "sectionData")
+        if not isinstance(section_data, dict):
+            continue
+        overview = section_data.get("overviewItems")
+        if isinstance(overview, list):
+            items.extend(overview)
+    return items
+
+
+def parse_listing_detail(payload: dict) -> ListingDetail:
+    """Extrahiert Raumzahlen aus dem Airbnb-Detailseiten-Payload.
+
+    Primäre Quelle: ``overviewItems`` aller Sections in
+    ``sbuiData.sectionConfiguration.root.sections``. Die title-Strings
+    ("2 guests", "1 bedroom", "1 bed", "1 bath") werden per Regex ausgelesen.
+    Fallback für ``max_guests``: ``sharingConfig.personCapacity``.
+
+    Bei unbekanntem / leerem Payload werden alle Felder als ``None``
+    zurückgegeben — kein Exception-Raise.
+
+    Args:
+        payload: Das rohe Payload-Dict aus dem ``data-deferred-state-0``-Tag
+                 der Airbnb-Detailseite.
+
+    Returns:
+        :class:`~airbi.scraper.models.ListingDetail` mit den extrahierten
+        Werten (nicht gefundene Felder sind ``None``).
+    """
+    bedrooms: int | None = None
+    beds: int | None = None
+    bathrooms: float | None = None
+    max_guests: int | None = None
+
+    try:
+        items = _collect_overview_items(payload)
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title", "")
+            if not isinstance(title, str):
+                continue
+
+            # max_guests: "2 guests"
+            if max_guests is None:
+                m = re.match(r"^(\d+)\s+guest", title, re.IGNORECASE)
+                if m:
+                    max_guests = int(m.group(1))
+                    continue
+
+            # bedrooms: "1 bedroom" / "Studio" → 0
+            if bedrooms is None:
+                if re.match(r"^studio$", title, re.IGNORECASE):
+                    bedrooms = 0
+                    continue
+                m = re.match(r"^(\d+)\s+bedroom", title, re.IGNORECASE)
+                if m:
+                    bedrooms = int(m.group(1))
+                    continue
+
+            # beds: "1 bed" (but NOT "1 bedroom")
+            if beds is None:
+                m = re.match(r"^(\d+)\s+bed\b", title, re.IGNORECASE)
+                if m:
+                    beds = int(m.group(1))
+                    continue
+
+            # bathrooms: "1 bath" / "1.5 baths" / "1 private bath"
+            if bathrooms is None:
+                m = re.match(r"^(\d+(?:\.\d+)?)\s+(?:\w+\s+)*bath", title, re.IGNORECASE)
+                if m:
+                    bathrooms = float(m.group(1))
+                    continue
+
+        # Fallback for max_guests via sharingConfig.personCapacity
+        if max_guests is None:
+            try:
+                capacity = (
+                    payload["niobeClientData"][0][1]["data"]
+                    ["presentation"]["stayProductDetailPage"]["sections"]
+                    ["metadata"]["sharingConfig"]["personCapacity"]
+                )
+                if isinstance(capacity, int):
+                    max_guests = capacity
+            except (KeyError, IndexError, TypeError):
+                pass
+
+    except Exception:
+        pass
+
+    return ListingDetail(
+        bedrooms=bedrooms,
+        beds=beds,
+        bathrooms=bathrooms,
+        max_guests=max_guests,
     )
 
 
