@@ -5,6 +5,8 @@
 > **Grundlage:** `BRIEFING-airbnb-bi-v0.3.0.md`
 > **Auftraggeber:** Michael Alber (Remote Republic Labs)
 > **Deployment-Ziel:** gehosteter Ubuntu-VPS (Single-Host)
+>
+> **Änderung v1.1 (2026-05-22):** Slice 1 nimmt einen **minimalen Detail-Crawl** auf. Grund: Die Aufnahme einer echten Airbnb-Antwort (Plan 2, Task 4) hat gezeigt, dass die Stufe-A-Suchdaten **keine Zimmerzahl** enthalten — `size_class` (Zeilen-Achse der Segment-Matrix) ist nicht aus Suchdaten ableitbar. Slice 1 holt daher pro Ganz-Apartment-Listing zusätzlich die Detailseite und extrahiert dort **nur die Raumzahlen** (Zimmer/Betten/Bäder/Gäste). Der volle Detail-Crawl für `amenity_score`/`luxury_class` bleibt aufgeschoben. Außerdem: Airbnb liefert Suchergebnisse serverseitig ins Seiten-HTML eingebettet (kein separater `StaysSearch`-XHR mehr) — der echte Browser liest das eingebettete JSON; das Design (echter Browser, strukturiertes JSON, kein reiner HTTP-Request) bleibt gewahrt.
 
 ---
 
@@ -40,9 +42,9 @@ Erfüllung von §12 in Slice 1:
 | Entscheidung | Wahl | Begründung |
 |---|---|---|
 | Build-Strategie | Vertikaler Durchstich | De-riskt Scraper UND Kernlogik früh, schnelles vorzeigbares Ergebnis am echten Use Case |
-| Slice-1-Zuschnitt | **Ohne** Detail-Crawl (Stufe B) | Dünnster echter Durchstich; Luxus-Achse = `price_tier`. Detail-Crawl/`amenity_score`/`luxury_class` folgen in Vertiefungsrunde |
+| Slice-1-Zuschnitt | **Minimaler** Detail-Crawl (nur Raumzahlen) | Stufe-A-Suchdaten enthalten keine Zimmerzahl (Befund Plan 2 Task 4) → `size_class` braucht die Detailseite. Slice 1 holt pro Listing nur Zimmer/Betten/Bäder/Gäste; voller Detail-Crawl für `amenity_score`/`luxury_class` folgt in Vertiefungsrunde. Luxus-Achse bleibt `price_tier`. |
 | Proxy-Infrastruktur | Slice 1 **ohne** Proxy | Ein einziger, kleiner Crawl-Lauf; Transport-Schicht bleibt proxy-fähig vorbereitet |
-| Crawl-Methode | API-Interception im echten Browser | Strukturierte, vollständige Daten (`review_count`, Lat/Lng exakt), robust gegen DOM-Änderungen, briefing-konform (kein reiner HTTP-Request) |
+| Crawl-Methode | Eingebettetes JSON im echten Browser | Airbnb rendert Suchergebnisse serverseitig ins Seiten-HTML (`data-deferred-state`); der echte Browser lädt die Seite, wir lesen das eingebettete strukturierte JSON. Kein reiner HTTP-Request — briefing-konform. |
 | Server-Typ | Gehosteter VPS (Datacenter-IP) | Bestimmt die Slice-1-Topologie (siehe §11) |
 
 ## 4. Architektur & Code-Struktur
@@ -115,25 +117,26 @@ Das Briefing listet `price_tier` als abgeleitetes Feld auf Listing. `price_tier`
 - **Bekannte, akzeptierte Limitierung:** Airbnb verschleiert Listing-Koordinaten (~100–200 m Jitter). Für Bezirks-Level-Zuordnung unkritisch, außer direkt an Bezirksgrenzen — passt zum „richtungssicher, nicht bilanzsicher"-Anspruch des Briefings.
 - Format so, dass eine neue Stadt später nur neue GeoJSONs + Crawl-Config braucht, keinen Code.
 
-## 7. Scraper — Stufe A (Search-Crawl)
+## 7. Scraper — Stufe A (Search-Crawl) + minimaler Detail-Crawl
 
 Oberstes Prinzip: so menschlich wie möglich, so wenig Requests wie nötig.
 
 - **Playwright (Python) + Chromium**, Stealth-gehärtet (Fingerprint, `navigator.webdriver` etc.).
 - **Persistenter Browser-Context** (`user_data_dir`) → Session/Cookies überleben Läufe (Briefing: Session-Persistenz).
 - **Transport-/Proxy-Schicht** in `browser.py`: dünne Abstraktion, in Slice 1 „direkt" (kein Proxy); in der Vertiefungsrunde kommt der Residential-Proxy per Config dazu — kein Umbau.
-- **Ablauf:** Browser öffnet die Airbnb-Suche für die Bounding-Box über Marvila+Beato. Über `page.on("response")` werden die `StaysSearch`-JSON-Antworten abgefangen, die der Browser beim Laden/Scrollen/Blättern selbst auslöst. Menschliches Scrollen + Pagination durch alle Ergebnisseiten, Dedup über `airbnb_id`.
-- **Pacing** (`pacing.py`): randomisierte, menschliche Verzögerungen zwischen Aktionen, gelegentlich längere Pausen — kein gleichmäßiges Polling. Slice 1 = zwei kleine Bezirke, ein Lauf, geringes Volumen.
-- **Parser getrennt** (`parser.py`): reine Funktion `StaysSearch`-JSON → Listing-/Snapshot-Felder, **browser-unabhängig** und gegen gespeicherte JSON-Fixtures testbar. Erwartete Felder: `airbnb_id`, Preis/Nacht, `rating`, `review_count`, `lat`/`lng`, Zimmer/Betten/Bäder, Titel, `property_type`.
-- **Lauf-Lebenszyklus:** Jeder Crawl = eine `CrawlRun`-Zeile. Pro gesehenem Listing: Upsert `Listing` (+ Bezirkszuordnung), Insert `Snapshot`.
+- **Stufe A — Search-Crawl:** Browser öffnet die Airbnb-Suche für die Bounding-Box über Marvila+Beato. Airbnb rendert die Suchergebnisse serverseitig ins Seiten-HTML eingebettet (`data-deferred-state`, kein separater `StaysSearch`-XHR); wir lesen dieses eingebettete JSON aus der geladenen Seite. Menschliches Blättern durch alle Ergebnisseiten, Dedup über `airbnb_id`.
+- **Stufe A liefert NICHT die Zimmerzahl** (Befund Plan 2 Task 4): nur `airbnb_id`, Property-Typ, Titel, `lat`/`lng`, Preis, `rating`, `review_count`, Superhost.
+- **Minimaler Detail-Crawl:** Für jedes Ganz-Apartment-Listing aus Stufe A wird zusätzlich die `/rooms/<id>`-Detailseite geladen und daraus **nur** Zimmer/Betten/Bäder/max. Gäste extrahiert (die Detailseite bettet diese Daten ebenfalls als JSON ein). Das ist die Datenbasis für `size_class`. Der volle Detail-Crawl für `amenity_score` bleibt aufgeschoben (Vertiefungsrunde). Nicht-Ganz-Apartment-Listings (private Zimmer, Hostels) werden gefiltert — die Investment-Matrix betrachtet ganze Apartments.
+- **Pacing** (`pacing.py`): randomisierte, menschliche Verzögerungen zwischen Aktionen, gelegentlich längere Pausen. Slice 1 = zwei kleine Emerging-Bezirke (geringe Listing-Dichte), ein Lauf, überschaubares Volumen.
+- **Parser getrennt** (`parser.py`): reine Funktionen `Such-JSON → ParsedListing` und `Detail-JSON → Raumzahlen`, **browser-unabhängig** und gegen aufgezeichnete JSON-Fixtures testbar. Da sich Airbnbs JSON-Struktur ändern kann, ist die Parsing-Schicht isoliert und durch Fixtures regressionsabgesichert.
+- **Lauf-Lebenszyklus:** Jeder Crawl = eine `CrawlRun`-Zeile. Pro Listing: Upsert `Listing` (+ Bezirkszuordnung, + `size_class`), Insert `Snapshot`.
 - **Block-Erkennung:** Bei erkannter CAPTCHA-/Block-Seite oder 0 Treffern bricht der Lauf sauber ab → `CrawlRun.status = failed` mit klarer Meldung, kein Weiterhämmern. Volles Monitoring/Alerting = Vertiefungsrunde.
-- **Robustheit:** defensives Retry/Backoff bei transienten Fehlern. Da sich die interne `StaysSearch`-API ändern kann (Schema/Operation-Hash), ist die Parsing-Schicht isoliert und durch Fixtures regressionsabgesichert.
 - **Trigger in Slice 1:** CLI vom Dev-Rechner (`airbi crawl --config "..."`). Kein UI-Crawl-Button (siehe §11).
 - **Calendar-Crawling bleibt ausgeschlossen.**
 
 ## 8. Klassifikation
 
-- **`size.py` — `size_class`** aus Schlafzimmerzahl: `Studio` / `1BR` / `2BR` / `3BR+`. Mapping mit sinnvollem Default in `classification_config`, justierbar. Auf `Listing` gespeichert. Listing ohne verwertbare Zimmerangabe → `unclassified`.
+- **`size.py` — `size_class`** aus Schlafzimmerzahl: `Studio` / `1BR` / `2BR` / `3BR+`. Mapping mit sinnvollem Default in `classification_config`, justierbar. Auf `Listing` gespeichert. Die Zimmerzahl stammt aus dem minimalen Detail-Crawl (§7) — die Stufe-A-Suchdaten enthalten sie nicht. Listing ohne verwertbare Zimmerangabe → `unclassified`.
 - **`price.py` — `price_tier`** aus ADR-Perzentilen **innerhalb des jeweiligen Bezirks**. ADR in Slice 1 = der Nacht-Preis aus dem Snapshot. Perzentile über die Crawl-Kohorte je Bezirk. Default-Tier-Grenzen z. B. Budget < P25 / Mid P25–P75 / Premium P75–P90 / Luxury > P90 — alle in `classification_config` justierbar. Zur Abfragezeit berechnet (§5.5).
 - Klare Trennung: `size.py` rein Listing-lokal, `price.py` kohorten- und configabhängig.
 - **Emerging-Bezirke:** Die in Briefing §5b/§7 erwähnte stärkere Amenity-Gewichtung für Marvila/Beato greift erst, wenn der `amenity_score` existiert (Vertiefungsrunde mit Detail-Crawl). In Slice 1 ist die Luxus-Achse bewusst rein `price_tier`.
@@ -199,7 +202,7 @@ Slice 1 ist abgenommen, wenn:
 
 ## 14. Bewusst NICHT in Slice 1
 
-- Detail-Crawl Stufe B, `amenity_score`, kombinierte `luxury_class`.
+- Voller Detail-Crawl für `amenity_score` / kombinierte `luxury_class` (Slice 1 hat nur den minimalen Detail-Crawl für Raumzahlen, siehe §7).
 - Review-Velocity (braucht mehrwöchige Snapshot-Historie).
 - APScheduler, systemd-Units, Backup, volles Monitoring/Alerting.
 - Residential-Proxy-Provider (Transport-Schicht ist vorbereitet, kein Provider angebunden).
