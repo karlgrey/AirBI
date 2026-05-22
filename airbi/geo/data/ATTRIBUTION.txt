@@ -1,0 +1,5 @@
+Bezirks-Polygone (*.geojson in den Unterverzeichnissen):
+© OpenStreetMap contributors
+Lizenz: Open Database License (ODbL) 1.0
+Quelle: https://www.openstreetmap.org/copyright
+Bezogen über die OpenStreetMap-Nominatim-API (boundary=administrative).
