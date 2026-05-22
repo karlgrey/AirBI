@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -173,6 +172,9 @@ def persist_results(
 # (e) run_search_crawl  — browser-gestützte Lauflogik (nicht in Unit-Tests)
 # ---------------------------------------------------------------------------
 
+_MAX_PAGES = 20  # Schutz gegen Endlosschleifen
+
+
 def run_search_crawl(
     session: "Session",
     search_config: "SearchConfig",
@@ -181,14 +183,16 @@ def run_search_crawl(
 ) -> "CrawlRun":
     """Führt einen vollständigen Crawl-Lauf durch.
 
-    Erstellt einen CrawlRun, öffnet den Browser, scrapt Suchergebnisse und
-    Detail-Seiten, persistiert die Ergebnisse und setzt den Status.
+    Erstellt einen CrawlRun, öffnet den Browser, scrapt alle Suchergebnis-
+    Seiten (paginiert via Cursor) und Detail-Seiten, persistiert die
+    Ergebnisse und setzt den Status.
     Committet am Ende (im Gegensatz zu persist_results).
 
     Wird erst in Task 10 live getestet.
     """
     import json
     import re as _re
+    import urllib.parse
 
     from airbi.db.models import CrawlRun
     from airbi.scraper.browser import browser_context
@@ -200,6 +204,74 @@ def run_search_crawl(
     run = CrawlRun(search_config=search_config, status="running")
     session.add(run)
     session.flush()
+
+    # ------------------------------------------------------------------
+    # Hilfsfunktion: eine Such-Seite laden und deren searchResults lesen.
+    # Gibt (search_results_list, page_cursors_list) zurück oder (None, [])
+    # bei Fehlern oder Block-Erkennung.
+    # ------------------------------------------------------------------
+    def _extract_json_from_html(html: str) -> dict | None:
+        pattern = rf'<script[^>]+id="{_DEFERRED_STATE_TAG_ID}"[^>]*>(.*?)</script>'
+        match = _re.search(pattern, html, _re.DOTALL)
+        if not match:
+            return None
+        try:
+            page_data = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            return None
+        niobe = page_data.get("niobeClientData", [])
+        for pair in niobe:
+            if isinstance(pair, list) and len(pair) == 2:
+                cache_key, response = pair
+                if isinstance(cache_key, str) and cache_key.startswith("StaysSearch:"):
+                    return response
+        return None
+
+    def _fetch_search_page(
+        pw_page: object,
+        url: str,
+        page_num: int,
+    ) -> tuple[list, list[str]]:
+        """Navigiert zu `url`, extrahiert searchResults und pageCursors.
+
+        Gibt ([], []) bei Block-Erkennung oder fehlendem JSON zurück.
+        """
+        try:
+            pw_page.goto(url, timeout=60_000, wait_until="domcontentloaded")
+            pw_page.wait_for_timeout(10_000)
+            html = pw_page.content()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Seite %d: Navigation fehlgeschlagen: %s", page_num, exc)
+            return [], []
+
+        lower_html = html.lower()
+        if "hcaptcha" in lower_html or "access denied" in lower_html:
+            logger.warning("Seite %d: Block/CAPTCHA erkannt.", page_num)
+            return [], []
+
+        stays_data = _extract_json_from_html(html)
+        if stays_data is None:
+            logger.warning("Seite %d: StaysSearch-JSON nicht gefunden.", page_num)
+            return [], []
+
+        search_results = (
+            stays_data
+            .get("data", {})
+            .get("presentation", {})
+            .get("staysSearch", {})
+            .get("results", {})
+            .get("searchResults", [])
+        )
+        page_cursors = (
+            stays_data
+            .get("data", {})
+            .get("presentation", {})
+            .get("staysSearch", {})
+            .get("results", {})
+            .get("paginationInfo", {})
+            .get("pageCursors", [])
+        )
+        return search_results, page_cursors
 
     try:
         all_districts = load_districts()
@@ -217,7 +289,7 @@ def run_search_crawl(
 
         sw_lat, sw_lng, ne_lat, ne_lng = bounding_box_for(relevant)
 
-        search_url = (
+        base_search_url = (
             "https://www.airbnb.com/s/Lisboa--Portugal/homes"
             f"?ne_lat={ne_lat}&ne_lng={ne_lng}&sw_lat={sw_lat}&sw_lng={sw_lng}"
             "&search_by_map=true&zoom=14"
@@ -225,80 +297,75 @@ def run_search_crawl(
 
         parsed_listings: dict[str, ParsedListing] = {}
 
-        def _extract_json_from_html(html: str) -> dict | None:
-            pattern = rf'<script[^>]+id="{_DEFERRED_STATE_TAG_ID}"[^>]*>(.*?)</script>'
-            match = _re.search(pattern, html, _re.DOTALL)
-            if not match:
-                return None
-            try:
-                page_data = json.loads(match.group(1))
-            except json.JSONDecodeError:
-                return None
-            niobe = page_data.get("niobeClientData", [])
-            for pair in niobe:
-                if isinstance(pair, list) and len(pair) == 2:
-                    cache_key, response = pair
-                    if isinstance(cache_key, str) and cache_key.startswith("StaysSearch:"):
-                        return response
-            return None
-
         with browser_context(headless=headless) as ctx:
             page = ctx.new_page()
 
-            # --- Suchergebnisse scrapen ---
-            page.goto(search_url, timeout=60_000, wait_until="domcontentloaded")
-            page.wait_for_timeout(10_000)
+            # ----------------------------------------------------------
+            # Seite 1 laden (kein Cursor)
+            # ----------------------------------------------------------
+            first_results, page_cursors = _fetch_search_page(page, base_search_url, 1)
 
-            html = page.content()
+            # Block auf Seite 1 → abbrechen
+            if not first_results and not page_cursors:
+                # Prüfe nochmal ob es ein echtes Block war
+                html_check = page.content().lower()
+                if "hcaptcha" in html_check or "access denied" in html_check:
+                    run.status = "failed"
+                    run.message = "CAPTCHA oder Block-Page erkannt."
+                    run.finished_at = datetime.now(timezone.utc)
+                    session.commit()
+                    return run
 
-            # Block-Erkennung: CAPTCHA / Blocking-Page
-            if "captcha" in html.lower() or "blocked" in html.lower():
-                run.status = "failed"
-                run.message = "CAPTCHA oder Block-Page erkannt."
-                run.finished_at = datetime.now(timezone.utc)
-                session.commit()
-                return run
-
-            stays_data = _extract_json_from_html(html)
-            if stays_data is None:
-                run.status = "failed"
-                run.message = "StaysSearch-JSON nicht im HTML gefunden."
-                run.finished_at = datetime.now(timezone.utc)
-                session.commit()
-                return run
-
-            results = (
-                stays_data
-                .get("data", {})
-                .get("presentation", {})
-                .get("staysSearch", {})
-                .get("results", {})
-                .get("searchResults", [])
-            )
-            map_results = (
-                stays_data
-                .get("data", {})
-                .get("presentation", {})
-                .get("staysSearch", {})
-                .get("mapResults", {})
-                .get("mapSearchResults", [])
-            )
-            all_results = results + map_results
-
-            if not all_results:
+            # 0-Treffer-Guard: prüft searchResults (was der Parser liest)
+            if not first_results:
                 run.status = "failed"
                 run.message = "Keine Suchergebnisse zurückgegeben (0 Listings)."
                 run.finished_at = datetime.now(timezone.utc)
                 session.commit()
                 return run
 
-            for pl in parse_search_results({"data": stays_data.get("data", {})}):
+            # Seite 1 einlesen
+            for pl in parse_search_results(
+                {"data": {"presentation": {"staysSearch": {"results": {"searchResults": first_results}}}}}
+            ):
                 parsed_listings[pl.airbnb_id] = pl
+
+            logger.info("Seite 1: %d Ergebnisse, %d Cursor verfügbar", len(first_results), len(page_cursors))
+
+            # ----------------------------------------------------------
+            # Seiten 2…N (Cursor-Paginierung)
+            # Cursor[0] = Seite 1 (offset 0), ab Cursor[1] = Seite 2
+            # URL-Parameter: &cursor=<base64-token>
+            # ----------------------------------------------------------
+            for page_idx, cursor in enumerate(page_cursors[1:_MAX_PAGES], start=2):
+                human_delay(*DEFAULT_PAGE_DELAY)
+                encoded_cursor = urllib.parse.quote(cursor)
+                page_url = base_search_url + f"&cursor={encoded_cursor}"
+
+                page_results, _ = _fetch_search_page(page, page_url, page_idx)
+                if not page_results:
+                    logger.info("Seite %d lieferte keine Ergebnisse, übersprungen.", page_idx)
+                    continue
+
+                new_count = 0
+                for pl in parse_search_results(
+                    {"data": {"presentation": {"staysSearch": {"results": {"searchResults": page_results}}}}}
+                ):
+                    if pl.airbnb_id not in parsed_listings:
+                        parsed_listings[pl.airbnb_id] = pl
+                        new_count += 1
+                    else:
+                        parsed_listings[pl.airbnb_id] = pl  # neueste Daten behalten
+
+                logger.info(
+                    "Seite %d: %d Ergebnisse (%d neu gesamt=%d)",
+                    page_idx, len(page_results), new_count, len(parsed_listings),
+                )
 
             # --- Entire-Home-Filter ---
             filtered = [pl for pl in parsed_listings.values() if is_entire_home(pl)]
             logger.info(
-                "Suchergebnisse: %d total, %d nach Entire-Home-Filter",
+                "Suchergebnisse: %d total (alle Seiten), %d nach Entire-Home-Filter",
                 len(parsed_listings),
                 len(filtered),
             )
