@@ -1,0 +1,115 @@
+{% if not completed_run %}
+  <div class="rounded-lg border border-slate-200 bg-white p-6 text-slate-500">
+    Noch kein abgeschlossener Crawl — die Segment-Matrix erscheint nach dem
+    ersten erfolgreichen <code>airbi crawl</code>-Lauf.
+  </div>
+{% elif not matrices %}
+  <div class="rounded-lg border border-slate-200 bg-white p-6 text-slate-500">
+    Für diesen Bezirk lagen im letzten Crawl keine zugeordneten Listings vor.
+  </div>
+{% else %}
+  <div class="grid gap-6 {% if matrices|length > 1 %}lg:grid-cols-2{% endif %}">
+    {% for matrix in matrices %}
+      <article class="rounded-lg border border-slate-200 bg-white p-5">
+        <header class="mb-4 flex items-baseline justify-between">
+          <h2 class="text-lg font-semibold">
+            Segment-Matrix — {{ matrix.district_slug.title() }}
+          </h2>
+          <span class="rounded bg-slate-100 px-2 py-0.5 text-xs uppercase
+                       tracking-wide text-slate-500"
+                title="Nachfrage basiert auf Review-Count (~{{ (matrix.review_rate * 100)|round|int }}%
+                       der Gäste bewerten), keine gemessene Auslastung.">
+            Nachfrage: Proxy
+          </span>
+        </header>
+
+        <p class="mb-4 text-sm leading-relaxed text-slate-700">
+          {{ matrix.recommendation }}
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full border-separate border-spacing-1 text-sm">
+            <thead>
+              <tr>
+                <th class="w-24 text-left text-xs font-medium uppercase
+                           tracking-wide text-slate-500">Größe ↓ / Tier →</th>
+                {% for tier in matrix.price_tiers %}
+                  <th class="px-2 py-1 text-left text-xs font-medium uppercase
+                             tracking-wide text-slate-500">{{ tier }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for size in matrix.size_classes %}
+                <tr>
+                  <th class="px-2 py-1 text-left text-xs font-medium
+                             text-slate-500">{{ size }}</th>
+                  {% for tier in matrix.price_tiers %}
+                    {% set cell = matrix.cell(size, tier) %}
+                    <td class="rounded p-2 align-top
+                               {% if cell.heat == 4 %}bg-emerald-500 text-white
+                               {% elif cell.heat == 3 %}bg-emerald-300
+                               {% elif cell.heat == 2 %}bg-emerald-200
+                               {% elif cell.heat == 1 %}bg-emerald-100
+                               {% else %}bg-slate-100 text-slate-400{% endif %}
+                               {% if matrix.best_cell == (size, tier) %}
+                                 ring-2 ring-amber-500
+                               {% endif %}">
+                      {% if cell.n == 0 %}
+                        <span class="text-xs">leer</span>
+                      {% else %}
+                        <div class="text-xs">
+                          {% if cell.is_thin %}
+                            <span class="rounded bg-white/60 px-1
+                                         text-[10px] uppercase text-slate-500">dünn</span>
+                          {% endif %}
+                          <span class="font-semibold">
+                            Ø {{ cell.score|round(0)|int }} Reviews
+                          </span>
+                        </div>
+                        <div class="text-[11px] opacity-80">
+                          N = {{ cell.n }} ·
+                          ADR €{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}
+                        </div>
+                      {% endif %}
+                    </td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <section class="mt-6">
+          <h3 class="text-sm font-medium uppercase tracking-wide text-slate-500">
+            Top-Performer
+          </h3>
+          {% if matrix.top_performers %}
+            <ul class="mt-2 divide-y divide-slate-100">
+              {% for perf in matrix.top_performers %}
+                <li class="flex items-baseline justify-between py-2 text-sm">
+                  <div>
+                    <a href="{{ perf.url }}" class="font-medium text-slate-900 hover:underline"
+                       target="_blank" rel="noreferrer">{{ perf.title or perf.airbnb_id }}</a>
+                    <span class="ml-2 rounded bg-slate-100 px-1.5 py-0.5
+                                 text-[11px] text-slate-600">
+                      {{ perf.size_class }} · {{ perf.price_tier }}
+                    </span>
+                  </div>
+                  <div class="text-xs text-slate-500">
+                    {{ perf.review_count }} Reviews
+                    {% if perf.rating %} · ★ {{ "%.2f"|format(perf.rating) }}{% endif %}
+                  </div>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="mt-2 text-sm text-slate-500">
+              Keine Top-Performer mit klassifizierter Größe in diesem Bezirk.
+            </p>
+          {% endif %}
+        </section>
+      </article>
+    {% endfor %}
+  </div>
+{% endif %}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}AirBI — Segment-Matrix{% endblock %}
+{% block content %}
+  <header class="mb-8">
+    <h1 class="text-3xl font-semibold tracking-tight">AirBI Dashboard</h1>
+    <p class="mt-1 text-sm text-slate-500">
+      Segment-Matrix: Welche Größe × Luxusklasse ist im Zielmarkt am attraktivsten?
+    </p>
+  </header>
+
+  {% if search_config is none %}
+    <section class="rounded-lg border border-amber-300 bg-amber-50 p-6 text-amber-900">
+      <h2 class="text-lg font-semibold">Noch keine SearchConfig</h2>
+      <p class="mt-2 text-sm">
+        Lege eine SearchConfig an und starte einen Crawl, dann erscheint die
+        Segment-Matrix hier.
+      </p>
+    </section>
+  {% else %}
+    <section class="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div class="rounded-lg border border-slate-200 bg-white p-5">
+        <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">
+          SearchConfig
+        </h2>
+        <p class="mt-2 text-xl font-semibold">{{ search_config.name }}</p>
+        <p class="text-sm text-slate-500">
+          {{ search_config.city_slug }} ·
+          {{ search_config.district_slugs|join(", ") }}
+        </p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-5">
+        <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">
+          Letzter Crawl
+        </h2>
+        {% if latest_run %}
+          <p class="mt-2 text-xl font-semibold">{{ latest_run.status }}</p>
+          <p class="text-sm text-slate-500">
+            {{ latest_run.started_at.strftime("%Y-%m-%d %H:%M") }} ·
+            {{ latest_run.listings_seen }} Listings
+          </p>
+          {% if latest_run.message %}
+            <p class="mt-2 text-xs text-slate-400">{{ latest_run.message }}</p>
+          {% endif %}
+        {% else %}
+          <p class="mt-2 text-sm text-slate-500">Noch kein Crawl gelaufen.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <nav class="mb-6 flex gap-2" aria-label="Bezirksfilter">
+      {% set districts = search_config.district_slugs %}
+      {% for slug in districts %}
+        <a href="/?config_id={{ search_config.id }}&district={{ slug }}"
+           class="rounded-md border px-3 py-1.5 text-sm
+                  {% if active_district == slug %}
+                    border-slate-900 bg-slate-900 text-white
+                  {% else %}
+                    border-slate-300 bg-white text-slate-700 hover:bg-slate-100
+                  {% endif %}">
+          {{ slug.title() }}
+        </a>
+      {% endfor %}
+      <a href="/?config_id={{ search_config.id }}&district=both"
+         class="rounded-md border px-3 py-1.5 text-sm
+                {% if active_district == 'both' %}
+                  border-slate-900 bg-slate-900 text-white
+                {% else %}
+                  border-slate-300 bg-white text-slate-700 hover:bg-slate-100
+                {% endif %}">Beide</a>
+    </nav>
+
+    <section id="matrix-region">
+      {% include "_matrix_region.html" %}
+    </section>
+  {% endif %}
+{% endblock %}
