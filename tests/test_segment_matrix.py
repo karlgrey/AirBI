@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
 from airbi.insights.segment_matrix import (
     PRICE_TIERS,
     SIZE_CLASSES,
@@ -8,6 +9,8 @@ from airbi.insights.segment_matrix import (
     SegmentMatrix,
     TopPerformer,
     build_segment_matrix,
+    compute_segment_matrix,
+    latest_completed_run,
 )
 
 
@@ -215,3 +218,83 @@ def test_top_performers_ignore_unclassified_size_class():
     assert all(p.size_class in SIZE_CLASSES for p in matrix.top_performers)
     assert any(p.airbnb_id == "b" for p in matrix.top_performers)
     assert all(p.airbnb_id != "a" for p in matrix.top_performers)
+
+
+def _seed(db_session, *, district, size_class, price, reviews, airbnb_id, run):
+    listing = Listing(
+        airbnb_id=airbnb_id, city_slug="lisboa", district_slug=district,
+        lat=38.74, lng=-9.10, property_type="Apartment",
+        bedrooms=1, size_class=size_class, title=f"L{airbnb_id}",
+        url=f"https://x/{airbnb_id}",
+    )
+    db_session.add(listing)
+    db_session.flush()
+    db_session.add(Snapshot(
+        listing_id=listing.id, crawl_run_id=run.id,
+        price=Decimal(str(price)), review_count=reviews, rating=4.7,
+    ))
+
+
+def _seed_run(db_session, *, status="completed"):
+    cfg = SearchConfig(name=f"Cfg-{status}-{id(db_session)}",
+                       district_slugs=["marvila", "beato"])
+    run = CrawlRun(search_config=cfg, status=status)
+    db_session.add(run)
+    db_session.flush()
+    return cfg, run
+
+
+def test_latest_completed_run_returns_most_recent_completed(db_session):
+    cfg, completed_old = _seed_run(db_session, status="completed")
+    completed_new = CrawlRun(search_config=cfg, status="completed")
+    failed = CrawlRun(search_config=cfg, status="failed")
+    db_session.add_all([completed_new, failed])
+    db_session.flush()
+    latest = latest_completed_run(db_session, cfg)
+    assert latest.id == completed_new.id
+
+
+def test_latest_completed_run_returns_none_when_no_completed_run(db_session):
+    cfg = SearchConfig(name="None", district_slugs=["marvila"])
+    db_session.add(CrawlRun(search_config=cfg, status="failed"))
+    db_session.flush()
+    assert latest_completed_run(db_session, cfg) is None
+
+
+def test_compute_segment_matrix_pulls_only_rows_for_district_and_run(db_session):
+    cfg, run = _seed_run(db_session)
+    # marvila: 3 1BR-Listings.
+    for i, (p, rev) in enumerate([(80, 10), (90, 12), (100, 8)]):
+        _seed(db_session, district="marvila", size_class="1BR",
+              price=p, reviews=rev, airbnb_id=f"M{i}", run=run)
+    # beato: 2 2BR-Listings (sollen NICHT auftauchen).
+    for i, (p, rev) in enumerate([(150, 50), (160, 60)]):
+        _seed(db_session, district="beato", size_class="2BR",
+              price=p, reviews=rev, airbnb_id=f"B{i}", run=run)
+    # Anderer Run: gehört nicht in dieses Ergebnis.
+    other_run = CrawlRun(search_config=cfg, status="completed")
+    db_session.add(other_run)
+    db_session.flush()
+    _seed(db_session, district="marvila", size_class="1BR",
+          price=200, reviews=999, airbnb_id="OTHER", run=other_run)
+
+    matrix = compute_segment_matrix(db_session, cfg, "marvila", run)
+    assert matrix.listing_count == 3
+    assert matrix.crawl_run_id == run.id
+    assert matrix.district_slug == "marvila"
+
+
+def test_compute_segment_matrix_respects_search_config_classification_config(db_session):
+    cfg, run = _seed_run(db_session)
+    cfg.classification_config = {"min_sample": 2}
+    db_session.flush()
+    # Zwei Listings mit demselben Preis -> selbe Zelle -> N = 2.
+    for i, (p, rev) in enumerate([(100, 10), (100, 20)]):
+        _seed(db_session, district="marvila", size_class="1BR",
+              price=p, reviews=rev, airbnb_id=f"M{i}", run=run)
+    matrix = compute_segment_matrix(db_session, cfg, "marvila", run)
+    # min_sample=2 -> die Zelle mit 2 Listings ist gerade nicht mehr dünn
+    # (mit dem Default 3 wäre sie es).
+    populated = next(c for c in matrix.cells.values() if c.n > 0)
+    assert populated.n == 2
+    assert populated.is_thin is False

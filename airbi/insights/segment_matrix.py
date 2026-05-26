@@ -14,7 +14,11 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from statistics import median
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from airbi.classification.price import price_tier as _price_tier
+from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
 
 # Reihenfolge bestimmt die Render-Reihenfolge in der Matrix.
 SIZE_CLASSES: list[str] = ["Studio", "1BR", "2BR", "3BR+"]
@@ -234,3 +238,53 @@ def build_segment_matrix(
         cell_rows, int(cfg["top_performers_per_segment"])
     )
     return matrix
+
+
+def latest_completed_run(
+    session: Session, search_config: SearchConfig
+) -> CrawlRun | None:
+    """Letzter erfolgreich abgeschlossener CrawlRun einer SearchConfig (oder None)."""
+    stmt = (
+        select(CrawlRun)
+        .where(CrawlRun.search_config_id == search_config.id)
+        .where(CrawlRun.status == "completed")
+        .order_by(CrawlRun.started_at.desc(), CrawlRun.id.desc())
+        .limit(1)
+    )
+    return session.execute(stmt).scalar_one_or_none()
+
+
+def compute_segment_matrix(
+    session: Session,
+    search_config: SearchConfig,
+    district_slug: str,
+    crawl_run: CrawlRun,
+) -> SegmentMatrix:
+    """Lädt die Listings + Snapshots aus crawl_run für einen Bezirk und ruft
+    den reinen Builder."""
+    session.flush()
+    stmt = (
+        select(Listing, Snapshot)
+        .join(Snapshot, Snapshot.listing_id == Listing.id)
+        .where(Snapshot.crawl_run_id == crawl_run.id)
+        .where(Listing.city_slug == search_config.city_slug)
+        .where(Listing.district_slug == district_slug)
+    )
+    rows = [
+        ListingRow(
+            airbnb_id=listing.airbnb_id,
+            title=listing.title,
+            url=listing.url,
+            size_class=listing.size_class or "unclassified",
+            price=snap.price,
+            review_count=snap.review_count or 0,
+            rating=snap.rating,
+        )
+        for listing, snap in session.execute(stmt).all()
+    ]
+    return build_segment_matrix(
+        rows,
+        config=search_config.classification_config or {},
+        district_slug=district_slug,
+        crawl_run_id=crawl_run.id,
+    )
