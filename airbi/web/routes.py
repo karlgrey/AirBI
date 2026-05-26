@@ -114,3 +114,28 @@ def dashboard(
             "active_district": district,
         },
     )
+
+
+@router.get("/matrix", response_class=HTMLResponse)
+def matrix_partial(
+    request: Request,
+    config_id: int | None = None,
+    district: str = "marvila",
+    session: Session = Depends(get_session),
+):
+    """HTMX-Partial: nur die Matrix-Region (eine oder zwei Matrizen)."""
+    search_config = _resolve_search_config(session, config_id)
+    if search_config is None:
+        return templates.TemplateResponse(
+            request, "_matrix_region.html",
+            {"matrices": [], "completed_run": None},
+        )
+    completed_run = latest_completed_run(session, search_config)
+    matrices = (
+        _matrices_for(session, search_config, district, completed_run)
+        if completed_run is not None else []
+    )
+    return templates.TemplateResponse(
+        request, "_matrix_region.html",
+        {"matrices": matrices, "completed_run": completed_run},
+    )

@@ -50,23 +50,31 @@
     <nav class="mb-6 flex gap-2" aria-label="Bezirksfilter">
       {% set districts = search_config.district_slugs %}
       {% for slug in districts %}
-        <a href="/?config_id={{ search_config.id }}&district={{ slug }}"
-           class="rounded-md border px-3 py-1.5 text-sm
-                  {% if active_district == slug %}
-                    border-slate-900 bg-slate-900 text-white
-                  {% else %}
-                    border-slate-300 bg-white text-slate-700 hover:bg-slate-100
-                  {% endif %}">
+        <button type="button"
+                hx-get="/matrix?config_id={{ search_config.id }}&district={{ slug }}"
+                hx-target="#matrix-region"
+                hx-swap="innerHTML"
+                class="rounded-md border px-3 py-1.5 text-sm
+                       {% if active_district == slug %}
+                         border-slate-900 bg-slate-900 text-white
+                       {% else %}
+                         border-slate-300 bg-white text-slate-700 hover:bg-slate-100
+                       {% endif %}">
           {{ slug.title() }}
-        </a>
+        </button>
       {% endfor %}
-      <a href="/?config_id={{ search_config.id }}&district=both"
-         class="rounded-md border px-3 py-1.5 text-sm
-                {% if active_district == 'both' %}
-                  border-slate-900 bg-slate-900 text-white
-                {% else %}
-                  border-slate-300 bg-white text-slate-700 hover:bg-slate-100
-                {% endif %}">Beide</a>
+      <button type="button"
+              hx-get="/matrix?config_id={{ search_config.id }}&district=both"
+              hx-target="#matrix-region"
+              hx-swap="innerHTML"
+              class="rounded-md border px-3 py-1.5 text-sm
+                     {% if active_district == 'both' %}
+                       border-slate-900 bg-slate-900 text-white
+                     {% else %}
+                       border-slate-300 bg-white text-slate-700 hover:bg-slate-100
+                     {% endif %}">
+        Beide
+      </button>
     </nav>
 
     <section id="matrix-region">

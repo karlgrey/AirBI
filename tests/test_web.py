@@ -81,3 +81,32 @@ def test_dashboard_empty_state_when_no_search_config(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "Noch keine SearchConfig" in response.text
+
+
+def test_matrix_partial_returns_single_district(client, db_session):
+    cfg = _seed_marvila(db_session)
+    response = client.get(f"/matrix?config_id={cfg.id}&district=marvila")
+    assert response.status_code == 200
+    body = response.text
+    assert "Segment-Matrix — Marvila" in body
+    assert "Segment-Matrix — Beato" not in body
+    # Partial enthält NICHT das Layout-Root (kein <html>-Tag).
+    assert "<html" not in body.lower()
+
+
+def test_matrix_partial_returns_two_matrices_for_both(client, db_session):
+    cfg = _seed_marvila(db_session)
+    response = client.get(f"/matrix?config_id={cfg.id}&district=both")
+    assert response.status_code == 200
+    body = response.text
+    assert "Segment-Matrix — Marvila" in body
+    assert "Segment-Matrix — Beato" in body
+
+
+def test_dashboard_filter_buttons_use_htmx(client, db_session):
+    cfg = _seed_marvila(db_session)
+    response = client.get(f"/?config_id={cfg.id}")
+    body = response.text
+    # Mindestens ein HTMX-Attribut auf den Filter-Buttons.
+    assert "hx-get=\"/matrix?config_id=" in body
+    assert "hx-target=\"#matrix-region\"" in body
