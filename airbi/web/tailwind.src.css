@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* Templates dieses Pakets nach Klassenverwendung scannen. */
+@source "./templates";
