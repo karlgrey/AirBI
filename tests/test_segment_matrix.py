@@ -155,3 +155,63 @@ def test_builder_heat_scales_1_to_4_for_eligible_cells():
     assert 1 <= matrix.cell("Studio", "Budget").heat <= 4
     assert 1 <= matrix.cell("1BR", "Budget").heat <= 4
     assert matrix.cell("Studio", "Budget").heat < matrix.cell("2BR", "Budget").heat
+
+
+def test_recommendation_names_district_size_tier_score_n_adr_and_proxy_note():
+    # 3 identische 1BR-Listings -> Cohort = [100,100,100] -> rank(100) = 0.0
+    # -> alle landen mit DEFAULT_PRICE_TIERS in der (1BR, Budget)-Zelle.
+    # N=3 = min_sample -> nicht dünn -> Best-Cell = (1BR, Budget).
+    rows = [_row(f"l{i}", "1BR", 100, review_count=80) for i in range(3)]
+    matrix = build_segment_matrix(rows, config={"min_sample": 3},
+                                  district_slug="marvila", crawl_run_id=1)
+    rec = matrix.recommendation
+    assert "Marvila" in rec
+    assert "1BR" in rec
+    assert "Budget" in rec           # Gewinner aus der Konstruktion
+    assert "80" in rec               # Ø Reviews je Listing
+    assert "3 Wettbewerber" in rec   # N = 3 Wettbewerber-Listings
+    assert "€100" in rec             # Median-ADR
+    assert "Proxy" in rec
+    assert "40%" in rec              # review_rate * 100
+
+
+def test_recommendation_falls_back_when_no_cell_meets_min_sample():
+    rows = [_row("1", "1BR", 100, 5)]  # nur 1 Listing -> alle Zellen dünn
+    matrix = build_segment_matrix(rows, config={"min_sample": 3},
+                                  district_slug="beato", crawl_run_id=1)
+    assert matrix.best_cell is None
+    assert "Beato" in matrix.recommendation
+    assert "zu dünn" in matrix.recommendation
+
+
+def test_top_performers_grouped_by_size_class_sorted_by_review_count():
+    rows = [
+        _row("a", "1BR", 100, 5,  rating=4.5),
+        _row("b", "1BR", 100, 90, rating=4.9),  # Top 1
+        _row("c", "1BR", 100, 50, rating=4.7),  # Top 2
+        _row("d", "2BR", 100, 30, rating=4.6),  # einziger 2BR
+    ]
+    matrix = build_segment_matrix(rows, config={"top_performers_per_segment": 2,
+                                                "min_sample": 1},
+                                  district_slug="m", crawl_run_id=1)
+    perfs = matrix.top_performers
+    # Reihenfolge: nach SIZE_CLASSES, innerhalb nach review_count desc.
+    one_br = [p for p in perfs if p.size_class == "1BR"]
+    assert [p.airbnb_id for p in one_br] == ["b", "c"]
+    two_br = [p for p in perfs if p.size_class == "2BR"]
+    assert [p.airbnb_id for p in two_br] == ["d"]
+    # Reihenfolge gesamt: 1BR-Block kommt vor 2BR-Block.
+    assert [p.size_class for p in perfs] == ["1BR", "1BR", "2BR"]
+
+
+def test_top_performers_ignore_unclassified_size_class():
+    rows = [
+        _row("a", "unclassified", 100, 999),
+        _row("b", "1BR", 100, 5),
+    ]
+    matrix = build_segment_matrix(rows, config={"min_sample": 1,
+                                                "top_performers_per_segment": 2},
+                                  district_slug="m", crawl_run_id=1)
+    assert all(p.size_class in SIZE_CLASSES for p in matrix.top_performers)
+    assert any(p.airbnb_id == "b" for p in matrix.top_performers)
+    assert all(p.airbnb_id != "a" for p in matrix.top_performers)

@@ -100,6 +100,64 @@ def _empty_grid() -> dict[tuple[str, str], Cell]:
     }
 
 
+def _district_label(slug: str) -> str:
+    """Hübscher Anzeigename für einen Bezirks-Slug ('marvila' -> 'Marvila')."""
+    return slug.replace("-", " ").replace("_", " ").title()
+
+
+def _build_recommendation(matrix: SegmentMatrix) -> str:
+    """Formuliert den Empfehlungssatz aus der gefüllten Matrix."""
+    label = _district_label(matrix.district_slug)
+    if matrix.best_cell is None:
+        return (
+            f"Für {label} liefert dieser Crawl noch keine Zelle mit mindestens "
+            f"{matrix.min_sample} vergleichbaren Objekten — die Datenbasis ist "
+            f"für eine belastbare Empfehlung zu dünn."
+        )
+    size, tier = matrix.best_cell
+    cell = matrix.cell(size, tier)
+    score = cell.score or 0.0
+    adr = int(cell.adr) if cell.adr is not None else 0
+    rate_pct = int(round(matrix.review_rate * 100))
+    return (
+        f"Für {label} ist {size}-{tier} am attraktivsten — Ø {score:.0f} "
+        f"Reviews je Listing bei {cell.n} Wettbewerber-Listings, "
+        f"Median-ADR €{adr}. Nachfrage ist ein Proxy aus Review-Count "
+        f"(~{rate_pct}% der Gäste bewerten), keine gemessene Auslastung."
+    )
+
+
+def _pick_top_performers(
+    rows_by_cell: dict[tuple[str, str], list[ListingRow]],
+    per_segment: int,
+) -> list[TopPerformer]:
+    """Top-N je Größenklasse, sortiert nach review_count desc, dann rating desc."""
+    by_size: dict[str, list[tuple[ListingRow, str]]] = {s: [] for s in SIZE_CLASSES}
+    for (size, tier), group in rows_by_cell.items():
+        for r in group:
+            by_size[size].append((r, tier))
+
+    result: list[TopPerformer] = []
+    for size in SIZE_CLASSES:
+        candidates = by_size[size]
+        candidates.sort(
+            key=lambda rt: (-rt[0].review_count, -(rt[0].rating or 0.0), rt[0].airbnb_id)
+        )
+        for r, tier in candidates[:per_segment]:
+            result.append(
+                TopPerformer(
+                    airbnb_id=r.airbnb_id,
+                    title=r.title,
+                    url=r.url,
+                    size_class=size,
+                    price_tier=tier,
+                    review_count=r.review_count,
+                    rating=r.rating,
+                )
+            )
+    return result
+
+
 def build_segment_matrix(
     rows: list[ListingRow],
     *,
@@ -162,7 +220,7 @@ def build_segment_matrix(
         else:
             cell.heat = max(1, min(4, round(cell.score / max_score * 4)))
 
-    return SegmentMatrix(
+    matrix = SegmentMatrix(
         district_slug=district_slug,
         crawl_run_id=crawl_run_id,
         cells=cells,
@@ -171,3 +229,8 @@ def build_segment_matrix(
         review_rate=float(cfg["review_rate"]),
         min_sample=min_sample,
     )
+    matrix.recommendation = _build_recommendation(matrix)
+    matrix.top_performers = _pick_top_performers(
+        cell_rows, int(cfg["top_performers_per_segment"])
+    )
+    return matrix
