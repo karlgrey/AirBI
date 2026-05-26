@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
+from statistics import median
+
+from airbi.classification.price import price_tier as _price_tier
 
 # Reihenfolge bestimmt die Render-Reihenfolge in der Matrix.
 SIZE_CLASSES: list[str] = ["Studio", "1BR", "2BR", "3BR+"]
@@ -83,3 +86,88 @@ class SegmentMatrix:
     def cell(self, size_class: str, price_tier: str) -> Cell:
         """Template-freundlicher Zugriff (Jinja kann keine Tuple-Subscripts)."""
         return self.cells[(size_class, price_tier)]
+
+
+def _merge_config(config: dict | None) -> dict:
+    return {**DEFAULT_INSIGHT_CONFIG, **(config or {})}
+
+
+def _empty_grid() -> dict[tuple[str, str], Cell]:
+    return {
+        (size, tier): Cell(size_class=size, price_tier=tier)
+        for size in SIZE_CLASSES
+        for tier in PRICE_TIERS
+    }
+
+
+def build_segment_matrix(
+    rows: list[ListingRow],
+    *,
+    config: dict | None,
+    district_slug: str,
+    crawl_run_id: int | None,
+) -> SegmentMatrix:
+    """Reine Aggregation der Segment-Matrix für genau einen Bezirk.
+
+    - Verteilt jeden ListingRow auf eine (size_class, price_tier)-Zelle.
+    - `price_tier` wird aus dem Preis-Kohort *dieser* rows berechnet (Spec
+      §5.5/§8: immer innerhalb des Bezirks).
+    - Zellen unter cfg['min_sample'] gelten als 'dünn' und scheiden aus der
+      Best-Cell-Wahl aus.
+    - `heat` 0-4 skaliert relativ zum besten nicht-dünnen Score.
+    """
+    cfg = _merge_config(config)
+    cells = _empty_grid()
+    cohort = [r.price for r in rows if r.price is not None]
+
+    # Listings auf Zellen verteilen.
+    cell_rows: dict[tuple[str, str], list[ListingRow]] = {}
+    listing_count = 0
+    for r in rows:
+        if r.size_class not in SIZE_CLASSES:
+            continue
+        if r.price is None:
+            continue
+        tier = _price_tier(r.price, cohort, cfg)
+        if tier not in PRICE_TIERS:
+            continue
+        cell_rows.setdefault((r.size_class, tier), []).append(r)
+        listing_count += 1
+
+    # Pro Zelle: N, R, Score, ADR, is_thin.
+    min_sample = int(cfg["min_sample"])
+    for key, group in cell_rows.items():
+        cell = cells[key]
+        cell.n = len(group)
+        cell.review_sum = sum(r.review_count for r in group)
+        cell.score = cell.review_sum / cell.n if cell.n else None
+        prices = [r.price for r in group if r.price is not None]
+        cell.adr = (
+            Decimal(median(prices)).quantize(Decimal("1")) if prices else None
+        )
+        cell.is_thin = cell.n < min_sample
+
+    # Best-Cell: höchster Score unter den nicht-dünnen Zellen.
+    eligible = [
+        (key, cell) for key, cell in cells.items()
+        if not cell.is_thin and cell.score is not None
+    ]
+    best_cell = max(eligible, key=lambda kv: kv[1].score, default=(None, None))[0]
+
+    # Heat 0-4 relativ zum besten nicht-dünnen Score.
+    max_score = max((c.score for _, c in eligible), default=None)
+    for cell in cells.values():
+        if cell.is_thin or cell.score is None or not max_score:
+            cell.heat = 0
+        else:
+            cell.heat = max(1, min(4, round(cell.score / max_score * 4)))
+
+    return SegmentMatrix(
+        district_slug=district_slug,
+        crawl_run_id=crawl_run_id,
+        cells=cells,
+        best_cell=best_cell,
+        listing_count=listing_count,
+        review_rate=float(cfg["review_rate"]),
+        min_sample=min_sample,
+    )
