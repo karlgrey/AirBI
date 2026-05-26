@@ -38,6 +38,19 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
         session.close()
 
 
+def _cmd_web(args: argparse.Namespace) -> int:
+    """Startet das FastAPI-Dashboard via uvicorn."""
+    import uvicorn
+
+    uvicorn.run(
+        "airbi.web.app:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     """Haupt-Einstiegspunkt der airbi CLI."""
     parser = argparse.ArgumentParser(
@@ -65,6 +78,17 @@ def main(argv: list[str] | None = None) -> None:
         help="Browser sichtbar anzeigen (Standard: headless)",
     )
 
+    # --- web ---
+    web_parser = subparsers.add_parser(
+        "web",
+        help="Dashboard-Webserver starten (uvicorn)",
+        description="Startet das AirBI-Dashboard auf dem angegebenen Host/Port.",
+    )
+    web_parser.add_argument("--host", default="127.0.0.1", help="Bind-Host (default 127.0.0.1)")
+    web_parser.add_argument("--port", type=int, default=8000, help="Bind-Port (default 8000)")
+    web_parser.add_argument("--reload", action="store_true", default=False,
+                            help="Auto-Reload bei Code-Änderungen (Entwicklung)")
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -72,5 +96,6 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(0)
 
     if args.command == "crawl":
-        exit_code = _cmd_crawl(args)
-        sys.exit(exit_code)
+        sys.exit(_cmd_crawl(args))
+    if args.command == "web":
+        sys.exit(_cmd_web(args))
