@@ -60,11 +60,14 @@ def test_builder_returns_full_4x4_grid_with_district_and_run_id():
 
 
 def test_builder_counts_listings_per_cell_and_sums_reviews():
+    # 5er-Cohort [60, 65, 90, 200, 300]: ranks 0.0 / 0.2 / 0.4 / 0.6 / 0.8.
+    # 60 und 65 -> Budget (rank < 0.25), Rest verteilt sich.
     rows = [
-        _row("1", "1BR", 60, 10),   # Budget
-        _row("2", "1BR", 65, 20),   # Budget
-        _row("3", "1BR", 200, 50),  # Luxury
-        _row("4", "2BR", 90, 5),    # Mid (mit dieser Kohorte)
+        _row("1", "1BR", 60, 10),   # Budget (rank 0.0)
+        _row("2", "1BR", 65, 20),   # Budget (rank 0.2)
+        _row("3", "1BR", 300, 50),  # Premium (rank 0.8)
+        _row("4", "1BR", 200, 7),   # Mid (rank 0.6) — Kohorten-Anker
+        _row("5", "2BR", 90, 5),    # Mid (rank 0.4)
     ]
     matrix = build_segment_matrix(rows, config={}, district_slug="m", crawl_run_id=1)
     budget_1br = matrix.cell("1BR", "Budget")
@@ -74,20 +77,22 @@ def test_builder_counts_listings_per_cell_and_sums_reviews():
 
 
 def test_builder_median_adr_per_cell():
+    # Cohort [60, 100, 200]: ranks 0.0 / 0.333 / 0.667.
+    # 100 und 200 landen beide in Mid -> Median = (100+200)/2 = 150.
     rows = [
-        _row("1", "1BR", 100, 5),
-        _row("2", "1BR", 200, 5),  # gleicher Tier wie 1 in dieser 2er-Kohorte
+        _row("0", "1BR", 60, 5),    # Budget — Kohorten-Anker
+        _row("1", "1BR", 100, 5),   # Mid (rank 1/3)
+        _row("2", "1BR", 200, 5),   # Mid (rank 2/3)
     ]
     matrix = build_segment_matrix(rows, config={}, district_slug="m", crawl_run_id=1)
-    # Beide landen über die Kohorten-Perzentile in derselben Zelle ->
-    # Median = (100+200)/2 = 150.
-    populated = [c for c in matrix.cells.values() if c.n > 0]
-    assert len(populated) == 1
-    assert populated[0].adr == Decimal("150")
+    mid_cell = matrix.cell("1BR", "Mid")
+    assert mid_cell.n == 2
+    assert mid_cell.adr == Decimal("150")
 
 
 def test_builder_marks_cells_below_min_sample_as_thin():
-    rows = [_row("1", "1BR", 100, 5), _row("2", "1BR", 110, 7)]
+    # Identischer Preis -> rank 0.0 -> beide in Budget.
+    rows = [_row("1", "1BR", 100, 5), _row("2", "1BR", 100, 7)]
     matrix = build_segment_matrix(rows, config={"min_sample": 3},
                                   district_slug="m", crawl_run_id=1)
     populated = next(c for c in matrix.cells.values() if c.n > 0)
@@ -108,17 +113,18 @@ def test_builder_skips_rows_with_unclassified_size_or_no_price():
 
 
 def test_builder_picks_best_cell_with_highest_score_above_min_sample():
+    # Identischer Preis -> alle in (size, Budget). Höchster Score gewinnt.
     rows = [
-        # Studio Mid: 3 Listings, je 20 Reviews -> score = 20.
-        _row("a1", "Studio", 100, 20), _row("a2", "Studio", 110, 20), _row("a3", "Studio", 120, 20),
-        # 1BR Mid: 3 Listings, je 50 Reviews -> score = 50  (Gewinner).
-        _row("b1", "1BR", 100, 50), _row("b2", "1BR", 110, 50), _row("b3", "1BR", 120, 50),
-        # 2BR Mid: nur 1 Listing mit 999 Reviews -> dünn, fliegt raus.
-        _row("c1", "2BR", 105, 999),
+        # Studio Budget: 3 Listings, je 20 Reviews -> score = 20.
+        _row("a1", "Studio", 100, 20), _row("a2", "Studio", 100, 20), _row("a3", "Studio", 100, 20),
+        # 1BR Budget: 3 Listings, je 50 Reviews -> score = 50  (Gewinner).
+        _row("b1", "1BR", 100, 50), _row("b2", "1BR", 100, 50), _row("b3", "1BR", 100, 50),
+        # 2BR Budget: nur 1 Listing mit 999 Reviews -> dünn, fliegt raus.
+        _row("c1", "2BR", 100, 999),
     ]
     matrix = build_segment_matrix(rows, config={"min_sample": 3},
                                   district_slug="m", crawl_run_id=1)
-    assert matrix.best_cell == ("1BR", "Mid")
+    assert matrix.best_cell == ("1BR", "Budget")
 
 
 def test_builder_returns_no_best_cell_when_all_cells_thin():
@@ -137,17 +143,15 @@ def test_builder_heat_is_zero_for_empty_or_thin_cells():
 
 
 def test_builder_heat_scales_1_to_4_for_eligible_cells():
-    # Drei nicht-dünne Zellen mit aufsteigenden Scores: 1, 5, 20.
+    # Drei nicht-dünne Budget-Zellen mit aufsteigenden Scores: 1, 5, 20.
+    # (Alle Preise gleich -> rank 0.0 -> Budget.)
     rows = []
-    # Studio Mid: 3 x 1 Review.
-    rows += [_row(f"s{i}", "Studio", 100, 1) for i in range(3)]
-    # 1BR Mid: 3 x 5 Reviews.
-    rows += [_row(f"o{i}", "1BR", 100, 5) for i in range(3)]
-    # 2BR Mid: 3 x 20 Reviews -> der Top, heat = 4.
-    rows += [_row(f"t{i}", "2BR", 100, 20) for i in range(3)]
+    rows += [_row(f"s{i}", "Studio", 100, 1) for i in range(3)]    # score = 1
+    rows += [_row(f"o{i}", "1BR", 100, 5) for i in range(3)]       # score = 5
+    rows += [_row(f"t{i}", "2BR", 100, 20) for i in range(3)]      # score = 20 (Top)
     matrix = build_segment_matrix(rows, config={"min_sample": 3},
                                   district_slug="m", crawl_run_id=1)
-    assert matrix.cell("2BR", "Mid").heat == 4
-    assert 1 <= matrix.cell("Studio", "Mid").heat <= 4
-    assert 1 <= matrix.cell("1BR", "Mid").heat <= 4
-    assert matrix.cell("Studio", "Mid").heat < matrix.cell("2BR", "Mid").heat
+    assert matrix.cell("2BR", "Budget").heat == 4
+    assert 1 <= matrix.cell("Studio", "Budget").heat <= 4
+    assert 1 <= matrix.cell("1BR", "Budget").heat <= 4
+    assert matrix.cell("Studio", "Budget").heat < matrix.cell("2BR", "Budget").heat
