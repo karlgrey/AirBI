@@ -89,8 +89,12 @@
               {% for perf in matrix.top_performers %}
                 <li class="flex items-baseline justify-between py-2 text-sm">
                   <div>
-                    <a href="{{ perf.url }}" class="font-medium text-slate-900 hover:underline"
-                       target="_blank" rel="noreferrer">{{ perf.title or perf.airbnb_id }}</a>
+                    {% if perf.url %}
+                      <a href="{{ perf.url }}" class="font-medium text-slate-900 hover:underline"
+                         target="_blank" rel="noreferrer">{{ perf.title or perf.airbnb_id }}</a>
+                    {% else %}
+                      <span class="font-medium text-slate-900">{{ perf.title or perf.airbnb_id }}</span>
+                    {% endif %}
                     <span class="ml-2 rounded bg-slate-100 px-1.5 py-0.5
                                  text-[11px] text-slate-600">
                       {{ perf.size_class }} · {{ perf.price_tier }}
