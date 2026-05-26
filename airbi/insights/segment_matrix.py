@@ -262,6 +262,10 @@ def compute_segment_matrix(
 ) -> SegmentMatrix:
     """Lädt die Listings + Snapshots aus crawl_run für einen Bezirk und ruft
     den reinen Builder."""
+    # SessionLocal nutzt autoflush=False — Pending Writes der gleichen
+    # Unit-of-Work müssen vor dem SELECT explizit sichtbar gemacht werden,
+    # damit Tests/Routen, die direkt vor der Insight schreiben, das Ergebnis
+    # auch lesen können.
     session.flush()
     stmt = (
         select(Listing, Snapshot)
