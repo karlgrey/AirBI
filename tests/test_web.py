@@ -144,6 +144,19 @@ def test_dashboard_empty_state_shows_neuer_text(client):
     assert "Noch kein Untersuchungsbereich angelegt" in response.text
 
 
+def test_format_date_de_renders_german_month_names():
+    """Direkter Test der Format-Helper: schützt gegen Off-by-one im Monats-Index
+    oder Reorder von _GERMAN_MONTHS."""
+    from datetime import datetime
+
+    from airbi.web.routes import _format_date_de
+
+    assert _format_date_de(datetime(2026, 5, 27)) == "27. Mai 2026"
+    assert _format_date_de(datetime(2026, 1, 1)) == "1. Januar 2026"
+    assert _format_date_de(datetime(2026, 12, 31)) == "31. Dezember 2026"
+    assert _format_date_de(None) is None
+
+
 def test_matrix_uses_klartext_size_labels(client, db_session):
     _seed_marvila(db_session)
     response = client.get("/")
