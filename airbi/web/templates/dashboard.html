@@ -1,50 +1,42 @@
 {% extends "base.html" %}
-{% block title %}AirBI — Segment-Matrix{% endblock %}
+{% block title %}AirBI — Marktübersicht{% endblock %}
 {% block content %}
-  <header class="mb-8">
+  <header class="mb-6">
     <h1 class="text-3xl font-semibold tracking-tight">AirBI Dashboard</h1>
     <p class="mt-1 text-sm text-slate-500">
-      Segment-Matrix: Welche Größe × Luxusklasse ist im Zielmarkt am attraktivsten?
+      Marktübersicht — welches Apartment-Segment lohnt sich am ehesten?
     </p>
   </header>
 
   {% if search_config is none %}
     <section class="rounded-lg border border-amber-300 bg-amber-50 p-6 text-amber-900">
-      <h2 class="text-lg font-semibold">Noch keine SearchConfig</h2>
+      <h2 class="text-lg font-semibold">Noch kein Untersuchungsbereich angelegt</h2>
       <p class="mt-2 text-sm">
-        Lege eine SearchConfig an und starte einen Crawl, dann erscheint die
-        Segment-Matrix hier.
+        Lege einen Untersuchungsbereich an und starte einen Crawl, dann erscheint
+        die Marktübersicht hier.
       </p>
     </section>
   {% else %}
-    <section class="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-      <div class="rounded-lg border border-slate-200 bg-white p-5">
-        <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">
-          SearchConfig
-        </h2>
-        <p class="mt-2 text-xl font-semibold">{{ search_config.name }}</p>
-        <p class="text-sm text-slate-500">
-          {{ search_config.city_slug }} ·
-          {{ search_config.district_slugs|join(", ") }}
-        </p>
-      </div>
-      <div class="rounded-lg border border-slate-200 bg-white p-5">
-        <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">
-          Letzter Crawl
-        </h2>
-        {% if latest_run %}
-          <p class="mt-2 text-xl font-semibold">{{ latest_run.status }}</p>
-          <p class="text-sm text-slate-500">
-            {{ latest_run.started_at.strftime("%Y-%m-%d %H:%M") }} ·
-            {{ latest_run.listings_seen }} Listings
-          </p>
-          {% if latest_run.message %}
-            <p class="mt-2 text-xs text-slate-400">{{ latest_run.message }}</p>
-          {% endif %}
-        {% else %}
-          <p class="mt-2 text-sm text-slate-500">Noch kein Crawl gelaufen.</p>
-        {% endif %}
-      </div>
+
+    <section class="mb-6 rounded-md border-l-4 border-blue-400 bg-blue-50 p-4 text-sm text-slate-700">
+      <h2 class="mb-1 font-semibold text-slate-900">So liest du dieses Dashboard</h2>
+      <p>
+        Wir vergleichen alle Apartments im Untersuchungsbereich nach Größe und
+        Preisklasse. Die <em>Marktübersicht</em>-Tabelle zeigt pro Feld:
+        durchschnittliche Bewertungen (Indikator für Nachfrage), Anzahl
+        Wettbewerber und Mittel-Preis. Die <em>Empfehlung</em> unten fasst
+        zusammen, welches Feld am attraktivsten erscheint.
+      </p>
+    </section>
+
+    <section class="mb-6 rounded-lg border border-slate-200 bg-white p-4">
+      <h2 class="text-xs font-medium uppercase tracking-wide text-slate-500">
+        Untersuchungsbereich
+      </h2>
+      <p class="mt-1 text-lg font-semibold text-slate-900">{{ search_config.name }}</p>
+      <p class="text-sm text-slate-500">
+        {{ city_label }} — {{ search_config.district_slugs|map("title")|join(", ") }}
+      </p>
     </section>
 
     <nav class="mb-6 flex gap-2" aria-label="Bezirksfilter">
@@ -73,12 +65,32 @@
                      {% else %}
                        border-slate-300 bg-white text-slate-700 hover:bg-slate-100
                      {% endif %}">
-        Beide
+        Vergleich
       </button>
     </nav>
 
     <section id="matrix-region">
       {% include "_matrix_region.html" %}
     </section>
+
+    <footer class="mt-10 flex justify-between border-t border-slate-200 pt-3 text-xs text-slate-500">
+      <div>
+        {% if latest_run %}
+          Datenstand · {{ latest_run_date_de }} · {{ latest_run.listings_seen }} Apartments
+        {% else %}
+          Noch kein Crawl gelaufen.
+        {% endif %}
+      </div>
+      <div>
+        {% if latest_run %}
+          {% if latest_run.status == 'completed' %}
+            vollständig erfasst
+          {% else %}
+            Status: {{ latest_run.status }}
+          {% endif %}
+        {% endif %}
+      </div>
+    </footer>
+
   {% endif %}
 {% endblock %}
