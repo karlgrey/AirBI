@@ -223,7 +223,10 @@ def test_recommendation_block_appears_below_top_apartments(client, db_session):
     response = client.get("/")
     body = response.text
     top_idx = body.find("Top-Apartments")
-    rec_idx = body.find("Empfehlung")
+    # Em-dash + Leerzeichen ist eindeutig nur in den Block-Headlines
+    # ("Empfehlung — am attraktivsten" / "Empfehlung — noch nicht möglich")
+    # und kollidiert nicht mit dem "Empfehlung"-Wort in der Onboarding-Box.
+    rec_idx = body.find("Empfehlung — ")
     assert top_idx > -1 and rec_idx > -1
     assert top_idx < rec_idx
 
