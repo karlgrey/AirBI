@@ -216,3 +216,61 @@ def test_top_apartments_use_compact_size_tags(client, db_session):
     for span in tag_spans:
         assert "1BR" not in span, f"Slug '1BR' in tag-span: {span!r}"
         assert "2BR" not in span, f"Slug '2BR' in tag-span: {span!r}"
+
+
+def test_recommendation_block_appears_below_top_apartments(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    top_idx = body.find("Top-Apartments")
+    rec_idx = body.find("Empfehlung")
+    assert top_idx > -1 and rec_idx > -1
+    assert top_idx < rec_idx
+
+
+def test_thin_recommendation_shows_lever_hint(client, db_session):
+    _seed_marvila(db_session)  # Marvila Fixtures: 6 Apartments, alle Zellen dünn
+    response = client.get("/")
+    body = response.text
+    assert "Empfehlung — noch nicht möglich" in body
+    assert "Datenbasis ist noch zu klein" in body
+    assert "Hebel:" in body
+    assert "Untersuchungsbereich" in body  # auch in der Card-Überschrift, aber zusätzlich im Hebel-Text
+
+
+def test_winner_recommendation_includes_proxy_disclaimer(client, db_session):
+    """Wenn eine Best-Cell existiert: Empfehlungs-Block enthält den Hinweis,
+    dass die Nachfragewerte ein Indikator sind. Mit dem Seed reichen die
+    Marvila-Daten nicht für eine Best-Cell. Wir nehmen daher eine zweite
+    SearchConfig mit min_sample=1 und prüfen den Sieger-Block.
+    """
+    from decimal import Decimal
+    from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
+
+    cfg = SearchConfig(
+        name="Test-Config-min1",
+        district_slugs=["marvila"],
+        classification_config={"min_sample": 1},
+    )
+    run = CrawlRun(search_config=cfg, status="completed", listings_seen=2)
+    db_session.add(run)
+    db_session.flush()
+    for i, (price, reviews) in enumerate([(100, 50), (110, 60)]):
+        listing = Listing(
+            airbnb_id=f"W{i}", city_slug="lisboa", district_slug="marvila",
+            lat=38.74, lng=-9.10, property_type="Apartment", bedrooms=1,
+            size_class="1BR", title=f"Winner {i}", url=f"https://x/W{i}",
+        )
+        db_session.add(listing)
+        db_session.flush()
+        db_session.add(Snapshot(
+            listing_id=listing.id, crawl_run_id=run.id,
+            price=Decimal(str(price)), review_count=reviews, rating=4.7,
+        ))
+    db_session.flush()
+
+    response = client.get(f"/?config_id={cfg.id}&district=marvila")
+    body = response.text
+    assert "Empfehlung — am attraktivsten" in body
+    assert "Nachfragewerte sind ein Indikator" in body
+    assert "% der Gäste bewerten" in body

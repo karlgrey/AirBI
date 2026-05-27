@@ -57,7 +57,7 @@
                                {% if matrix.best_cell == (size, tier) %}
                                  ring-2 ring-amber-500
                                {% endif %}"
-                        title="{{ size }} · {{ tier }} — Durchschnittliche Bewertungen je Apartment, Anzahl Wettbewerber und Mittel-Preis pro Nacht. Empfehlung wird per Bewertungen ÷ Wettbewerber bestimmt.">
+                        title="{{ size }} · {{ tier }} — Durchschnittliche Bewertungen je Apartment, Anzahl Wettbewerber und Mittel-Preis pro Nacht. Attraktivität wird per Bewertungen ÷ Wettbewerber bestimmt.">
                       {% if cell.n == 0 %}
                         <span class="text-xs">—</span>
                       {% else %}
@@ -124,6 +124,47 @@
             </p>
           {% endif %}
         </section>
+
+        {% if matrix.best_cell %}
+          {% set size, tier = matrix.best_cell %}
+          {% set cell = matrix.cell(size, tier) %}
+          <section class="mt-6 rounded-md border-l-4 border-amber-500 bg-amber-50 p-4">
+            <h3 class="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-900">
+              Empfehlung — am attraktivsten
+            </h3>
+            <p class="text-sm text-amber-950">
+              <strong>
+                {% if size == "Studio" %}Studio
+                {% elif size == "1BR" %}1 Schlafzimmer
+                {% elif size == "2BR" %}2 Schlafzimmer
+                {% elif size == "3BR+" %}3+ Schlafzimmer
+                {% else %}{{ size }}{% endif %}
+                · {{ tier }}.
+              </strong>
+              Im Schnitt {{ cell.score|round(0)|int }} Bewertungen pro Apartment bei
+              {{ cell.n }} Wettbewerber{% if cell.n != 1 %}n{% endif %},
+              Mittel-Preis €{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}/Nacht.
+            </p>
+            <p class="mt-2 text-xs italic text-amber-800">
+              Nachfragewerte sind ein Indikator (~{{ (matrix.review_rate * 100)|round|int }}% der
+              Gäste bewerten), keine gemessene Auslastung.
+            </p>
+          </section>
+        {% else %}
+          <section class="mt-6 rounded-md border-l-4 border-slate-400 bg-slate-50 p-4">
+            <h3 class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
+              Empfehlung — noch nicht möglich
+            </h3>
+            <p class="text-sm text-slate-700">
+              Die Datenbasis ist noch zu klein für eine belastbare Empfehlung.
+              Wir brauchen mindestens {{ matrix.min_sample }} vergleichbare Apartments pro Feld.
+            </p>
+            <p class="mt-2 rounded bg-slate-100 px-3 py-2 text-xs text-slate-700">
+              <strong>Hebel:</strong> Größerer Untersuchungsbereich, oder weitere Crawl-Läufe
+              über Zeit — jeder bringt neue Apartments.
+            </p>
+          </section>
+        {% endif %}
       </article>
     {% endfor %}
   </div>
