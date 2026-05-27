@@ -34,3 +34,4 @@ build/
 # Tailwind-Standalone-Binary (plattform-spezifisch, nicht committen)
 tailwindcss
 tailwindcss-*
+.superpowers/
