@@ -55,19 +55,36 @@ def bounding_box_for(
 # (b) is_entire_home
 # ---------------------------------------------------------------------------
 
+# Title-Signale, die auf eine Privatzimmer-Vermietung hindeuten — zusätzlich
+# zur property_type-Prüfung. Plan-2-Befund: Airbnb klassifiziert manche
+# Privatzimmer in Guesthouses / B&Bs unter property_type='Guesthouse' o.ä.;
+# der Listing-Name verrät den Privatzimmer-Charakter trotzdem.
+_PRIVATE_ROOM_TITLE_NEEDLES: tuple[str, ...] = (
+    "private room",
+    "shared room",
+)
+
+
 def is_entire_home(parsed_listing: ParsedListing) -> bool:
     """True wenn das Listing eine ganze Unterkunft ist (kein Zimmer).
 
-    Heuristik: False wenn `property_type` (case-insensitiv) das Wort "room"
-    enthält oder exakt "hostel" ist; sonst True. None → False.
+    Heuristik in zwei Stufen:
+    1. False wenn ``property_type`` (case-insensitiv) das Wort "room" enthält
+       oder exakt "hostel" ist.
+    2. Zusätzlich False wenn der ``title`` (Listing-Name) ein Privatzimmer-
+       Signal enthält (z.B. 'Private Room with AC ...' bei einem
+       Guesthouse-Listing).
+
+    ``property_type=None`` → False.
     """
     pt = parsed_listing.property_type
     if pt is None:
         return False
-    lower = pt.lower().strip()
-    if "room" in lower:
+    lower_pt = pt.lower().strip()
+    if "room" in lower_pt or lower_pt == "hostel":
         return False
-    if lower == "hostel":
+    title = (parsed_listing.title or "").lower()
+    if any(needle in title for needle in _PRIVATE_ROOM_TITLE_NEEDLES):
         return False
     return True
 
