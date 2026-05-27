@@ -13,26 +13,21 @@
       <article class="rounded-lg border border-slate-200 bg-white p-5">
         <header class="mb-4 flex items-baseline justify-between">
           <h2 class="text-lg font-semibold">
-            Segment-Matrix — {{ matrix.district_slug.title() }}
+            Marktübersicht {{ matrix.district_slug.title() }}
           </h2>
           <span class="rounded bg-slate-100 px-2 py-0.5 text-xs uppercase
                        tracking-wide text-slate-500"
-                title="Nachfrage basiert auf Review-Count (~{{ (matrix.review_rate * 100)|round|int }}%
-                       der Gäste bewerten), keine gemessene Auslastung.">
-            Nachfrage: Proxy
+                title="Wir können Buchungen nicht direkt zählen. Mehr Bewertungen ≈ mehr Buchungen über die Lebenszeit (Annahme: ~{{ (matrix.review_rate * 100)|round|int }}% der Gäste bewerten).">
+            geschätzte Nachfrage ⓘ
           </span>
         </header>
-
-        <p class="mb-4 text-sm leading-relaxed text-slate-700">
-          {{ matrix.recommendation }}
-        </p>
 
         <div class="overflow-x-auto">
           <table class="w-full border-separate border-spacing-1 text-sm">
             <thead>
               <tr>
-                <th class="w-24 text-left text-xs font-medium uppercase
-                           tracking-wide text-slate-500">Größe ↓ / Tier →</th>
+                <th class="w-32 text-left text-xs font-medium uppercase
+                           tracking-wide text-slate-500">Apartment-Größe ↓ / Preisklasse →</th>
                 {% for tier in matrix.price_tiers %}
                   <th class="px-2 py-1 text-left text-xs font-medium uppercase
                              tracking-wide text-slate-500">{{ tier }}</th>
@@ -43,7 +38,13 @@
               {% for size in matrix.size_classes %}
                 <tr>
                   <th class="px-2 py-1 text-left text-xs font-medium
-                             text-slate-500">{{ size }}</th>
+                             text-slate-500">
+                    {% if size == "Studio" %}Studio
+                    {% elif size == "1BR" %}1 Schlafzimmer
+                    {% elif size == "2BR" %}2 Schlafzimmer
+                    {% elif size == "3BR+" %}3+ Schlafzimmer
+                    {% else %}{{ size }}{% endif %}
+                  </th>
                   {% for tier in matrix.price_tiers %}
                     {% set cell = matrix.cell(size, tier) %}
                     <td class="rounded p-2 align-top
@@ -54,22 +55,23 @@
                                {% else %}bg-slate-100 text-slate-400{% endif %}
                                {% if matrix.best_cell == (size, tier) %}
                                  ring-2 ring-amber-500
-                               {% endif %}">
+                               {% endif %}"
+                        title="{{ size }} · {{ tier }} — Durchschnittliche Bewertungen je Apartment, Anzahl Wettbewerber und Mittel-Preis pro Nacht. Empfehlung wird per Bewertungen ÷ Wettbewerber bestimmt.">
                       {% if cell.n == 0 %}
-                        <span class="text-xs">leer</span>
+                        <span class="text-xs">—</span>
                       {% else %}
                         <div class="text-xs">
                           {% if cell.is_thin %}
                             <span class="rounded bg-white/60 px-1
-                                         text-[10px] uppercase text-slate-500">dünn</span>
+                                         text-[10px] uppercase text-slate-500">Stichprobe klein</span>
                           {% endif %}
                           <span class="font-semibold">
-                            Ø {{ cell.score|round(0)|int }} Reviews
+                            {{ cell.score|round(0)|int }} Bew./Apt
                           </span>
                         </div>
                         <div class="text-[11px] opacity-80">
-                          N = {{ cell.n }} ·
-                          ADR €{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}
+                          {{ cell.n }} Wettb. ·
+                          €{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}/N.
                         </div>
                       {% endif %}
                     </td>

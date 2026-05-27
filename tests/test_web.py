@@ -68,13 +68,13 @@ def test_dashboard_renders_matrix_and_panel(client, db_session):
     body = response.text
     assert cfg.name in body
     assert "Marvila" in body
-    assert "Segment-Matrix" in body
+    assert "Marktübersicht" in body
     # CrawlRun-Status-Panel.
     assert "vollständig erfasst" in body
     # Mindestens ein Listing-Titel taucht in den Top-Performern auf.
     assert "Marvila Loft" in body
     # Proxy-Kennzeichnung sichtbar.
-    assert "Proxy" in body
+    assert "geschätzte Nachfrage" in body
 
 
 
@@ -83,8 +83,8 @@ def test_matrix_partial_returns_single_district(client, db_session):
     response = client.get(f"/matrix?config_id={cfg.id}&district=marvila")
     assert response.status_code == 200
     body = response.text
-    assert "Segment-Matrix — Marvila" in body
-    assert "Segment-Matrix — Beato" not in body
+    assert "Marktübersicht Marvila" in body
+    assert "Marktübersicht Beato" not in body
     # Partial enthält NICHT das Layout-Root (kein <html>-Tag).
     assert "<html" not in body.lower()
 
@@ -94,8 +94,8 @@ def test_matrix_partial_returns_two_matrices_for_both(client, db_session):
     response = client.get(f"/matrix?config_id={cfg.id}&district=both")
     assert response.status_code == 200
     body = response.text
-    assert "Segment-Matrix — Marvila" in body
-    assert "Segment-Matrix — Beato" in body
+    assert "Marktübersicht Marvila" in body
+    assert "Marktübersicht Beato" in body
 
 
 def test_dashboard_filter_buttons_use_htmx(client, db_session):
@@ -142,3 +142,40 @@ def test_dashboard_empty_state_shows_neuer_text(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "Noch kein Untersuchungsbereich angelegt" in response.text
+
+
+def test_matrix_uses_klartext_size_labels(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "1 Schlafzimmer" in body
+    assert "2 Schlafzimmer" in body
+    assert "3+ Schlafzimmer" in body
+    assert "Studio" in body
+    assert "Apartment-Größe" in body
+    assert "Preisklasse" in body
+
+
+def test_matrix_cell_uses_klartext_metrics(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "Bew./Apt" in body
+    assert "Wettb." in body
+    assert "/N." in body
+
+
+def test_matrix_thin_marker_in_klartext(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "Stichprobe klein" in body
+    assert ">dünn<" not in body
+
+
+def test_matrix_empty_cell_uses_em_dash(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "—" in body
+    assert ">leer<" not in body
