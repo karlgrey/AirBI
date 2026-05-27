@@ -11,9 +11,9 @@ from airbi.scraper.search_crawl import (
 )
 
 
-def _parsed(airbnb_id, lat, lng, property_type="Apartment", review_count=10):
+def _parsed(airbnb_id, lat, lng, property_type="Apartment", review_count=10, title="T"):
     return ParsedListing(
-        airbnb_id=airbnb_id, title="T", url=f"u/{airbnb_id}", lat=lat, lng=lng,
+        airbnb_id=airbnb_id, title=title, url=f"u/{airbnb_id}", lat=lat, lng=lng,
         property_type=property_type, bedrooms=None, beds=None, bathrooms=None,
         max_guests=None, host_name=None, is_superhost=False,
         price=Decimal("100.00"), fees=None, review_count=review_count,
@@ -34,6 +34,38 @@ def test_is_entire_home_accepts_apartments_rejects_rooms():
     assert is_entire_home(_parsed("2", 38.74, -9.10, property_type="Loft"))
     assert not is_entire_home(_parsed("3", 38.74, -9.10, property_type="Room"))
     assert not is_entire_home(_parsed("4", 38.74, -9.10, property_type="Shared room"))
+
+
+def test_is_entire_home_rejects_guesthouse_with_private_room_title():
+    """Plan-2-Befund: Airbnb klassifiziert manche Privatzimmer-Vermietungen
+    als property_type='Guesthouse'. Der Title verrät die Tatsache ('Private
+    Room with AC ...'). Property-Type-Filter allein reicht nicht."""
+    assert not is_entire_home(_parsed(
+        "X", 38.74, -9.10,
+        property_type="Guesthouse",
+        title="Private Room with AC & Self Check-in – Lisbon",
+    ))
+    # Auch 'shared room' im Titel filtert
+    assert not is_entire_home(_parsed(
+        "Y", 38.74, -9.10,
+        property_type="Bed and breakfast",
+        title="Cozy shared room near the center",
+    ))
+
+
+def test_is_entire_home_allows_apartment_with_unrelated_title():
+    """Die Title-Heuristik darf normale Apartment-Titel nicht filtern."""
+    assert is_entire_home(_parsed(
+        "Z", 38.74, -9.10,
+        property_type="Apartment",
+        title="Bright Lisbon Riverside Cozy Apartment",
+    ))
+    # 'bedroom' im Titel ist KEIN Privatzimmer-Signal
+    assert is_entire_home(_parsed(
+        "W", 38.74, -9.10,
+        property_type="Apartment",
+        title="Lovely Loft - Master Bedroom Faces River",
+    ))
 
 
 def test_merge_detail_fills_room_counts():

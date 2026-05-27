@@ -38,7 +38,10 @@ def _search_payload():
     return json.loads(SEARCH_FIXTURE.read_text(encoding="utf-8"))
 
 
-def test_search_parser_returns_all_18_results():
+def test_search_parser_returns_all_results_in_fixture():
+    # Aktuelle Fixture: 18 Listings (siehe Aufnahme-Befund in
+    # scripts/record_stays_search.py Kopfkommentar). Bei neuer Aufnahme
+    # diese Zahl an die tatsächliche Listing-Anzahl anpassen.
     assert len(parse_search_results(_search_payload())) == 18
 
 
@@ -54,7 +57,7 @@ def test_search_parser_core_fields_present_and_typed():
 
 def test_search_parser_assigns_1_based_positions():
     listings = parse_search_results(_search_payload())
-    assert [pl.search_position for pl in listings] == list(range(1, 19))
+    assert [pl.search_position for pl in listings] == list(range(1, len(listings) + 1))
 
 
 def test_search_parser_first_result_within_lisbon_bbox():
@@ -156,3 +159,14 @@ def test_detail_parser_tolerates_unexpected_shape():
     detail = parse_listing_detail({})
     assert detail.bedrooms is None
     assert detail.max_guests is None
+
+
+def test_search_parser_extracts_price_from_discounted_line():
+    """Listings mit primaryLine.__typename = DiscountedDisplayPriceLine
+    haben den Preis unter primaryLine.discountedPrice statt .price.
+    Plan: 2026-05-27 Parser-Cleanup, Discovery Task 1.
+    """
+    listings = parse_search_results(_search_payload())
+    target = next(pl for pl in listings if pl.airbnb_id == "17346774")
+    assert target.price is not None
+    assert target.price > 0
