@@ -70,6 +70,34 @@ Felder eines einzelnen searchResults-Eintrags:
 Daten-Container im Fixture:
   fixture["variables"]  →  Suchanfrage-Parameter (rawParams, treatmentFlags, …)
   fixture["data"]["presentation"]["staysSearch"]["results"]["paginationInfo"]  →  Paginierung
+
+=== Aufnahme 2026-05-27: no-price-Discovery (Plan: 2026-05-27 Parser-Cleanup) ===
+
+Aufnahme über die Marvila+Beato-Bounding-Box am 2026-05-27.
+Total Listings: 18
+no-price Listings: 5 von 18
+
+Strukturvarianten der no-price Listings:
+
+  Variante A: primaryLine.__typename = DiscountedDisplayPriceLine
+    Vorkommen: 5 Listings (idx=7 "Room in Lisbon", idx=10 "Place to stay in Lisbon",
+               idx=13 "Room in Lisbon", idx=15 "Condo in Lisbon", idx=17 "Apartment in Lisbon")
+    primaryLine-Keys: __typename, accessibilityLabel, concatQualifierLeft,
+                      discountedPrice, originalPrice, qualifier, trailing
+    Recovery: primaryLine.discountedPrice  (z.B. "€ 294", "€ 210", "€ 450", "€ 636", "€ 675")
+              originalPrice enthält den durchgestrichenen Originalpreis (z.B. "€ 345")
+              qualifier ist "total" (identisch mit QualifiedDisplayPriceLine-Listings)
+
+  Variante B: structuredDisplayPrice = null
+    Vorkommen: 0 Listings in dieser Aufnahme
+
+  Variante C: primaryLine ohne discountedPrice (anderer typename)
+    Vorkommen: 0 Listings in dieser Aufnahme
+
+Beobachtung: Alle 5 no-price Listings haben Sonderangebots-Rabatte (Special offer oder
+Gesamtpreisrabatt gegenüber Normalpreis). Der Typ DiscountedDisplayPriceLine tritt auf,
+wenn Airbnb einen durchgestrichenen Originalpreis neben dem Rabattpreis anzeigt.
+Der Parser muss primaryLine.discountedPrice als Fallback zu primaryLine.price lesen.
 """
 import json
 import re
