@@ -159,3 +159,14 @@ def test_detail_parser_tolerates_unexpected_shape():
     detail = parse_listing_detail({})
     assert detail.bedrooms is None
     assert detail.max_guests is None
+
+
+def test_search_parser_extracts_price_from_discounted_line():
+    """Listings mit primaryLine.__typename = DiscountedDisplayPriceLine
+    haben den Preis unter primaryLine.discountedPrice statt .price.
+    Plan: 2026-05-27 Parser-Cleanup, Discovery Task 1.
+    """
+    listings = parse_search_results(_search_payload())
+    target = next(pl for pl in listings if pl.airbnb_id == "17346774")
+    assert target.price is not None
+    assert target.price > 0

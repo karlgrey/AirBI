@@ -102,6 +102,15 @@ def _parse_property_type(title: str | None) -> str | None:
     return title
 
 
+# Geordnete Liste der Preis-Pfade unter einem searchResult-Eintrag.
+# Erste Variante mit nicht-None-Treffer gewinnt. Liste basiert auf
+# Discovery-Befund (siehe scripts/record_stays_search.py Kopfkommentar).
+PRICE_PATHS: tuple[tuple[str, ...], ...] = (
+    ("structuredDisplayPrice", "primaryLine", "price"),
+    ("structuredDisplayPrice", "primaryLine", "discountedPrice"),
+)
+
+
 def _parse_result(r: dict, position: int) -> ParsedListing | None:
     """Verarbeitet einen einzelnen searchResults-Eintrag zu einem ParsedListing.
     Gibt ``None`` zurück, wenn die minimalen Pflichtfelder fehlen."""
@@ -123,8 +132,13 @@ def _parse_result(r: dict, position: int) -> ParsedListing | None:
     page_title = r.get("title")
     property_type = _parse_property_type(page_title)
 
-    price_str = _dig(r, "structuredDisplayPrice", "primaryLine", "price")
-    price = _parse_price(price_str)
+    price = None
+    for path in PRICE_PATHS:
+        price_str = _dig(r, *path)
+        if price_str:
+            price = _parse_price(price_str)
+            if price is not None:
+                break
 
     rating, review_count = _parse_rating(r.get("avgRatingLocalized"))
 
