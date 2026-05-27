@@ -85,8 +85,11 @@
 
         <section class="mt-6">
           <h3 class="text-sm font-medium uppercase tracking-wide text-slate-500">
-            Top-Performer
+            Top-Apartments
           </h3>
+          <p class="mt-1 text-xs italic text-slate-400">
+            Sortiert nach Bewertungen — dem stärksten verfügbaren Buchungs-Indikator
+          </p>
           {% if matrix.top_performers %}
             <ul class="mt-2 divide-y divide-slate-100">
               {% for perf in matrix.top_performers %}
@@ -100,11 +103,16 @@
                     {% endif %}
                     <span class="ml-2 rounded bg-slate-100 px-1.5 py-0.5
                                  text-[11px] text-slate-600">
-                      {{ perf.size_class }} · {{ perf.price_tier }}
+                      {% if perf.size_class == "Studio" %}Studio
+                      {% elif perf.size_class == "1BR" %}1 SZ
+                      {% elif perf.size_class == "2BR" %}2 SZ
+                      {% elif perf.size_class == "3BR+" %}3+ SZ
+                      {% else %}{{ perf.size_class }}{% endif %}
+                      · {{ perf.price_tier }}
                     </span>
                   </div>
                   <div class="text-xs text-slate-500">
-                    {{ perf.review_count }} Reviews
+                    {{ perf.review_count }} Bewertungen
                     {% if perf.rating %} · ★ {{ "%.2f"|format(perf.rating) }}{% endif %}
                   </div>
                 </li>
@@ -112,7 +120,7 @@
             </ul>
           {% else %}
             <p class="mt-2 text-sm text-slate-500">
-              Keine Top-Performer mit klassifizierter Größe in diesem Bezirk.
+              Keine Top-Apartments mit klassifizierter Größe in diesem Bezirk.
             </p>
           {% endif %}
         </section>

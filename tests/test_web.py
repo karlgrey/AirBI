@@ -179,3 +179,40 @@ def test_matrix_empty_cell_uses_em_dash(client, db_session):
     body = response.text
     assert "—" in body
     assert ">leer<" not in body
+
+
+def test_top_apartments_section_renamed(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "Top-Apartments" in body
+    assert "Top-Performer" not in body
+
+
+def test_top_apartments_has_sort_explanation(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "Sortiert nach Bewertungen" in body
+    assert "Buchungs-Indikator" in body
+
+
+def test_top_apartments_use_compact_size_tags(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    # Kompakt-Form für Top-Apartments-Tag: "1 SZ · ...", nicht "1BR · ..."
+    assert "1 SZ" in body or "2 SZ" in body
+    # Alter Slug-Stil darf nicht in sichtbaren Tag-Spans der Top-Apartments vorkommen.
+    # "1BR · " und "2BR · " sind nur noch in title=-Tooltips der Tabelle erlaubt,
+    # nicht im sichtbaren Span-Inhalt.
+    import re
+    # Prüfe, dass kein sichtbarer Tag-Span (ml-2 rounded … text-slate-600) den Slug enthält.
+    tag_spans = re.findall(
+        r'<span class="ml-2 rounded bg-slate-100[^"]*text-slate-600">(.*?)</span>',
+        body,
+        re.DOTALL,
+    )
+    for span in tag_spans:
+        assert "1BR" not in span, f"Slug '1BR' in tag-span: {span!r}"
+        assert "2BR" not in span, f"Slug '2BR' in tag-span: {span!r}"
