@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
@@ -25,6 +26,19 @@ from airbi.insights.segment_matrix import (
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+_GERMAN_MONTHS = (
+    "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+)
+
+
+def _format_date_de(dt: datetime | None) -> str | None:
+    """Datum im deutschen Stil: '27. Mai 2026' (kein führendes Null im Tag)."""
+    if dt is None:
+        return None
+    return f"{dt.day}. {_GERMAN_MONTHS[dt.month - 1]} {dt.year}"
+
 
 router = APIRouter()
 
@@ -104,6 +118,8 @@ def dashboard(
         _matrices_for(session, search_config, district, completed_run)
         if completed_run is not None else []
     )
+    latest_run_date_de = _format_date_de(latest_run.started_at) if latest_run else None
+    city_label = "Lissabon" if search_config.city_slug == "lisboa" else search_config.city_slug
     return templates.TemplateResponse(
         request, "dashboard.html",
         {
@@ -112,6 +128,8 @@ def dashboard(
             "completed_run": completed_run,
             "matrices": matrices,
             "active_district": district,
+            "latest_run_date_de": latest_run_date_de,
+            "city_label": city_label,
         },
     )
 

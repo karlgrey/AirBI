@@ -70,17 +70,12 @@ def test_dashboard_renders_matrix_and_panel(client, db_session):
     assert "Marvila" in body
     assert "Segment-Matrix" in body
     # CrawlRun-Status-Panel.
-    assert "completed" in body
+    assert "vollständig erfasst" in body
     # Mindestens ein Listing-Titel taucht in den Top-Performern auf.
     assert "Marvila Loft" in body
     # Proxy-Kennzeichnung sichtbar.
     assert "Proxy" in body
 
-
-def test_dashboard_empty_state_when_no_search_config(client):
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "Noch keine SearchConfig" in response.text
 
 
 def test_matrix_partial_returns_single_district(client, db_session):
@@ -110,3 +105,40 @@ def test_dashboard_filter_buttons_use_htmx(client, db_session):
     # Mindestens ein HTMX-Attribut auf den Filter-Buttons.
     assert "hx-get=\"/matrix?config_id=" in body
     assert "hx-target=\"#matrix-region\"" in body
+
+
+def test_dashboard_has_onboarding_box(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "So liest du dieses Dashboard" in body
+
+
+def test_dashboard_uses_untersuchungsbereich_label(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "Untersuchungsbereich" in body
+    assert "Lissabon" in body  # city_label aus city_slug = "lisboa"
+
+
+def test_dashboard_filter_has_vergleich_button(client, db_session):
+    cfg = _seed_marvila(db_session)
+    response = client.get(f"/?config_id={cfg.id}")
+    body = response.text
+    assert "Vergleich" in body
+    assert "Marvila" in body and "Beato" in body
+
+
+def test_dashboard_footer_shows_datenstand(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "Datenstand" in body
+    assert "25 Apartments" in body or "6 Apartments" in body  # _seed_marvila legt 6 an
+
+
+def test_dashboard_empty_state_shows_neuer_text(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Noch kein Untersuchungsbereich angelegt" in response.text
