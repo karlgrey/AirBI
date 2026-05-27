@@ -30,3 +30,7 @@ build/
 
 # Git worktrees
 .worktrees/
+
+# Tailwind-Standalone-Binary (plattform-spezifisch, nicht committen)
+tailwindcss
+tailwindcss-*
