@@ -46,3 +46,11 @@ def test_amenity_score_weights_configurable():
                        "comfort": 0.10, "superhost": 0.10, "rating": 0.10}}
     zeroed = _score(amenities, config=cfg)
     assert zeroed < default
+
+
+def test_amenity_score_hair_dryer_not_counted_as_premium():
+    """Regression: 'Hair dryer' (allgegenwärtig) darf den Premium-Score
+    nicht aufblähen — kein 'dryer'-Substring-Treffer."""
+    only_hair_dryer = _score(["Hair dryer"])
+    truly_minimal = _score(["Towel"])
+    assert only_hair_dryer == truly_minimal

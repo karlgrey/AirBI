@@ -27,7 +27,9 @@ DEFAULT_AMENITY_CONFIG: dict = {
         "pool", "hot tub", "air conditioning", "free parking",
         "free street parking", "paid parking", "elevator", "dishwasher",
         "smart lock", "self check-in", "gym", "ev charger",
-        "private patio or balcony", "outdoor furniture", "bbq grill", "dryer",
+        "private patio or balcony", "outdoor furniture", "bbq grill",
+        # Bewusst KEIN "dryer": würde als Substring das allgegenwärtige
+        # "Hair dryer" matchen und den Premium-Count verfälschen.
     ],
     "premium_target": 6,
     "richness_target": 40,
