@@ -207,7 +207,8 @@ def _extract_amenities(payload: dict) -> list[str]:
         for it in items:
             if not isinstance(it, dict):
                 continue
-            if it.get("available") is False:
+            # Spec §6: nur available == True (fehlend/None gilt als nicht verfügbar)
+            if it.get("available") is not True:
                 continue
             title = it.get("title")
             if isinstance(title, str) and title and title not in seen:

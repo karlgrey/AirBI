@@ -88,7 +88,7 @@ class Listing(Base):
     license_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
     al_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    amenities: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    amenities: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="listing")
 
