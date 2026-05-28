@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
 from airbi.insights.segment_matrix import (
-    PRICE_TIERS,
+    LUXURY_CLASSES,
     SIZE_CLASSES,
     Cell,
     ListingRow,
@@ -21,34 +21,34 @@ def test_dataclasses_construct_with_minimal_args():
     )
     assert row.airbnb_id == "1"
 
-    cell = Cell(size_class="1BR", price_tier="Mid")
+    cell = Cell(size_class="1BR", luxury_class="Mid")
     assert cell.n == 0 and cell.is_thin is True and cell.heat == 0
 
     perf = TopPerformer(
         airbnb_id="1", title="T", url="u", size_class="1BR",
-        price_tier="Mid", review_count=5, rating=4.7,
+        luxury_class="Mid", review_count=5, rating=4.7,
     )
     assert perf.size_class == "1BR"
 
 
 def test_matrix_axes_have_expected_order():
     assert SIZE_CLASSES == ["Studio", "1BR", "2BR", "3BR+"]
-    assert PRICE_TIERS == ["Budget", "Mid", "Premium", "Luxury"]
+    assert LUXURY_CLASSES == ["Budget", "Mid", "Premium", "Luxury"]
 
 
 def test_segment_matrix_cell_lookup_returns_stored_cell():
     matrix = SegmentMatrix(district_slug="marvila", crawl_run_id=1)
-    cell = Cell(size_class="1BR", price_tier="Premium", n=3, is_thin=False)
+    cell = Cell(size_class="1BR", luxury_class="Premium", n=3, is_thin=False)
     matrix.cells[("1BR", "Premium")] = cell
     assert matrix.cell("1BR", "Premium") is cell
 
 
-def _row(airbnb_id, size_class, price, review_count, rating=4.5):
+def _row(airbnb_id, size_class, price, review_count, rating=4.5, amenity_score=0.0):
     return ListingRow(
         airbnb_id=airbnb_id, title=f"L{airbnb_id}", url=f"https://x/{airbnb_id}",
         size_class=size_class,
         price=Decimal(str(price)) if price is not None else None,
-        review_count=review_count, rating=rating,
+        review_count=review_count, rating=rating, amenity_score=amenity_score,
     )
 
 
@@ -58,19 +58,26 @@ def test_builder_returns_full_4x4_grid_with_district_and_run_id():
     assert matrix.crawl_run_id == 42
     assert len(matrix.cells) == 16
     for size in SIZE_CLASSES:
-        for tier in PRICE_TIERS:
-            assert (size, tier) in matrix.cells
+        for lux in LUXURY_CLASSES:
+            assert (size, lux) in matrix.cells
 
 
 def test_builder_counts_listings_per_cell_and_sums_reviews():
     # 5er-Cohort [60, 65, 90, 200, 300]: ranks 0.0 / 0.2 / 0.4 / 0.6 / 0.8.
-    # 60 und 65 -> Budget (rank < 0.25), Rest verteilt sich.
+    # With amenity=0 and default weights 0.5/0.5:
+    #   luxury_index = 0.5 * price_percentile
+    #   thresholds: 0.25, 0.5, 0.75 → index<0.25 = Budget, index<0.5 = Mid
+    # 60 (rank 0.0): index 0.0 -> Budget
+    # 65 (rank 0.2): index 0.1 -> Budget
+    # 90 (rank 0.4): index 0.2 -> Budget
+    # 200 (rank 0.6): index 0.3 -> Mid
+    # 300 (rank 0.8): index 0.4 -> Mid
     rows = [
         _row("1", "1BR", 60, 10),   # Budget (rank 0.0)
         _row("2", "1BR", 65, 20),   # Budget (rank 0.2)
-        _row("3", "1BR", 300, 50),  # Premium (rank 0.8)
-        _row("4", "1BR", 200, 7),   # Mid (rank 0.6) — Kohorten-Anker
-        _row("5", "2BR", 90, 5),    # Mid (rank 0.4)
+        _row("3", "1BR", 300, 50),  # Mid (rank 0.8)
+        _row("4", "1BR", 200, 7),   # Mid (rank 0.6)
+        _row("5", "2BR", 90, 5),    # Budget (rank 0.4)
     ]
     matrix = build_segment_matrix(rows, config={}, district_slug="m", crawl_run_id=1)
     budget_1br = matrix.cell("1BR", "Budget")
@@ -81,16 +88,21 @@ def test_builder_counts_listings_per_cell_and_sums_reviews():
 
 def test_builder_median_adr_per_cell():
     # Cohort [60, 100, 200]: ranks 0.0 / 0.333 / 0.667.
-    # 100 und 200 landen beide in Mid -> Median = (100+200)/2 = 150.
+    # With amenity=0 and default weights 0.5/0.5:
+    #   luxury_index = 0.5 * price_percentile
+    # 60 (rank 0.0): index 0.0 -> Budget
+    # 100 (rank 0.333): index 0.167 -> Budget
+    # 200 (rank 0.667): index 0.333 -> Mid
+    # Budget has n=2 (prices 60,100) -> adr = median(60,100) = 80
     rows = [
-        _row("0", "1BR", 60, 5),    # Budget — Kohorten-Anker
-        _row("1", "1BR", 100, 5),   # Mid (rank 1/3)
-        _row("2", "1BR", 200, 5),   # Mid (rank 2/3)
+        _row("0", "1BR", 60, 5),    # Budget
+        _row("1", "1BR", 100, 5),   # Budget
+        _row("2", "1BR", 200, 5),   # Mid
     ]
     matrix = build_segment_matrix(rows, config={}, district_slug="m", crawl_run_id=1)
-    mid_cell = matrix.cell("1BR", "Mid")
-    assert mid_cell.n == 2
-    assert mid_cell.adr == Decimal("150")
+    budget_cell = matrix.cell("1BR", "Budget")
+    assert budget_cell.n == 2
+    assert budget_cell.adr == Decimal("80")
 
 
 def test_builder_marks_cells_below_min_sample_as_thin():
@@ -147,7 +159,7 @@ def test_builder_heat_is_zero_for_empty_or_thin_cells():
 
 def test_builder_heat_scales_1_to_4_for_eligible_cells():
     # Drei nicht-dünne Budget-Zellen mit aufsteigenden Scores: 1, 5, 20.
-    # (Alle Preise gleich -> rank 0.0 -> Budget.)
+    # (Alle Preise gleich -> rank 0.0 -> luxury_index 0.0 -> Budget.)
     rows = []
     rows += [_row(f"s{i}", "Studio", 100, 1) for i in range(3)]    # score = 1
     rows += [_row(f"o{i}", "1BR", 100, 5) for i in range(3)]       # score = 5
@@ -162,7 +174,7 @@ def test_builder_heat_scales_1_to_4_for_eligible_cells():
 
 def test_recommendation_names_district_size_tier_score_n_adr_and_proxy_note():
     # 3 identische 1BR-Listings -> Cohort = [100,100,100] -> rank(100) = 0.0
-    # -> alle landen mit DEFAULT_PRICE_TIERS in der (1BR, Budget)-Zelle.
+    # -> luxury_index 0.0 -> alle in (1BR, Budget).
     # N=3 = min_sample -> nicht dünn -> Best-Cell = (1BR, Budget).
     rows = [_row(f"l{i}", "1BR", 100, review_count=80) for i in range(3)]
     matrix = build_segment_matrix(rows, config={"min_sample": 3},
@@ -218,6 +230,20 @@ def test_top_performers_ignore_unclassified_size_class():
     assert all(p.size_class in SIZE_CLASSES for p in matrix.top_performers)
     assert any(p.airbnb_id == "b" for p in matrix.top_performers)
     assert all(p.airbnb_id != "a" for p in matrix.top_performers)
+
+
+def test_builder_amenity_score_shifts_listing_into_higher_luxury_class():
+    cfg = {"min_sample": 1, "luxury_weights": {"price": 0.35, "amenity": 0.65}}
+    rows = [
+        _row("a", "1BR", 100, 10, amenity_score=0.0),
+        _row("b", "1BR", 100, 10, amenity_score=0.0),
+        _row("c", "1BR", 100, 10, amenity_score=0.0),
+        _row("d", "1BR", 100, 10, amenity_score=0.95),
+    ]
+    matrix = build_segment_matrix(rows, config=cfg, district_slug="m", crawl_run_id=1)
+    classes_with_d = [lux for (sz, lux), cell in matrix.cells.items()
+                      if cell.n > 0 and sz == "1BR"]
+    assert "Premium" in classes_with_d or "Luxury" in classes_with_d
 
 
 def _seed(db_session, *, district, size_class, price, reviews, airbnb_id, run):
