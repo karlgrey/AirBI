@@ -163,13 +163,49 @@ def test_detail_parser_tolerates_unexpected_shape():
 
 def test_search_parser_extracts_price_from_discounted_line():
     """Listings mit primaryLine.__typename = DiscountedDisplayPriceLine
-    haben den Preis unter primaryLine.discountedPrice statt .price.
+    haben weiterhin einen Preis (jetzt der Pro-Nacht-Preis aus explanationData,
+    nicht der rabattierte Aufenthalts-Total).
     Plan: 2026-05-27 Parser-Cleanup, Discovery Task 1.
     """
     listings = parse_search_results(_search_payload())
     target = next(pl for pl in listings if pl.airbnb_id == "17346774")
     assert target.price is not None
     assert target.price > 0
+    # Pro-Nacht (explanationData "5 nights x €94.17"), NICHT der Total €450:
+    assert target.price == Decimal("94.17")
+
+
+def test_search_parser_price_is_per_night_not_stay_total():
+    """Root-Cause-Regression: primaryLine.price trägt qualifier='total' (5-Nächte-
+    Aufenthalt). Der Parser MUSS den Pro-Nacht-Preis aus explanationData nehmen.
+    Für jedes Listing: gespeicherter Preis == Pro-Nacht und strikt < Aufenthalts-Total."""
+    from airbi.scraper.parser import _decode_listing_id, _parse_price
+
+    payload = _search_payload()
+    by_id = {pl.airbnb_id: pl for pl in parse_search_results(payload)}
+    results = payload["data"]["presentation"]["staysSearch"]["results"]["searchResults"]
+
+    checked = 0
+    for r in results:
+        sdp = r.get("structuredDisplayPrice") or {}
+        primary = sdp.get("primaryLine") or {}
+        try:
+            desc = sdp["explanationData"]["priceDetails"][0]["items"][0]["description"]
+        except (KeyError, IndexError, TypeError):
+            continue
+        if " x " not in desc:
+            continue
+        expected_per_night = _parse_price(desc.split(" x ", 1)[1])
+        total = _parse_price(primary.get("price") or primary.get("discountedPrice"))
+
+        aid = _decode_listing_id(r["demandStayListing"]["id"])
+        pl = by_id.get(aid)
+        assert pl is not None and pl.price is not None, f"{aid}: kein Preis"
+        assert pl.price == expected_per_night, f"{aid}: {pl.price} != per-night {expected_per_night}"
+        if total is not None:
+            assert pl.price < total, f"{aid}: Preis {pl.price} ist der Total {total}!"
+        checked += 1
+    assert checked >= 15
 
 
 def test_detail_parser_extracts_available_amenities():
