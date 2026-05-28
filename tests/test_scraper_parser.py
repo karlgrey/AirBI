@@ -183,7 +183,14 @@ def test_detail_parser_extracts_available_amenities():
 
 def test_detail_parser_extracts_description():
     detail = parse_listing_detail(_detail_payload())
-    assert detail.description is None or "<" not in detail.description
+    # Die Fixture HAT eine Beschreibung — sie muss extrahiert werden.
+    assert detail.description is not None
+    assert len(detail.description) > 0
+    assert "<" not in detail.description  # HTML-Tags gestrippt
+
+
+def test_detail_parser_description_none_on_unexpected_shape():
+    assert parse_listing_detail({}).description is None
 
 
 def test_detail_parser_amenities_empty_on_unexpected_shape():

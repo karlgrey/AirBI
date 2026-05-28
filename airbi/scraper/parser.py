@@ -228,9 +228,13 @@ def _extract_description(payload: dict) -> str | None:
         long = descs.get("longDescriptionHtml")
         for cand in (short, long):
             if isinstance(cand, dict):
-                raw = cand.get("localizedStringWithTranslationPreference") or cand.get("localizedString") or cand.get("content")
-                if raw is None and isinstance(cand.get("content"), dict):
-                    raw = cand["content"].get("localizedStringWithTranslationPreference") or cand["content"].get("localizedString")
+                # Text kann direkt im cand liegen ODER eine Ebene tiefer unter "content".
+                inner = cand.get("content") if isinstance(cand.get("content"), dict) else cand
+                raw = (
+                    inner.get("localizedStringWithTranslationPreference")
+                    or inner.get("localizedString")
+                    or (inner.get("content") if isinstance(inner.get("content"), str) else None)
+                )
                 if raw:
                     break
             elif isinstance(cand, str) and cand:
