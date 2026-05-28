@@ -83,25 +83,19 @@ def _latest_any_run(
 def _matrices_for(
     session: Session,
     search_config: SearchConfig,
-    district_filter: str,
+    radius_km: float,
     crawl_run: CrawlRun,
 ) -> list[SegmentMatrix]:
-    districts = (
-        search_config.district_slugs
-        if district_filter == "both"
-        else [district_filter]
-    )
-    return [
-        compute_segment_matrix(session, search_config, d, crawl_run)
-        for d in districts
-    ]
+    """Genau eine Matrix für den gewählten Umkreis (als Liste, damit das
+    Region-Template unverändert iterieren kann)."""
+    return [compute_segment_matrix(session, search_config, radius_km, crawl_run)]
 
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
     config_id: int | None = None,
-    district: str = "marvila",
+    radius_km: float = 2.0,
     session: Session = Depends(get_session),
 ):
     search_config = _resolve_search_config(session, config_id)
@@ -109,13 +103,13 @@ def dashboard(
         return templates.TemplateResponse(
             request, "dashboard.html",
             {"search_config": None, "latest_run": None,
-             "matrices": [], "active_district": district,
+             "matrices": [], "active_radius": radius_km,
              "completed_run": None},
         )
     latest_run = _latest_any_run(session, search_config)
     completed_run = latest_completed_run(session, search_config)
     matrices = (
-        _matrices_for(session, search_config, district, completed_run)
+        _matrices_for(session, search_config, radius_km, completed_run)
         if completed_run is not None else []
     )
     latest_run_date_de = _format_date_de(latest_run.started_at) if latest_run else None
@@ -127,7 +121,7 @@ def dashboard(
             "latest_run": latest_run,
             "completed_run": completed_run,
             "matrices": matrices,
-            "active_district": district,
+            "active_radius": radius_km,
             "latest_run_date_de": latest_run_date_de,
             "city_label": city_label,
         },
@@ -138,10 +132,10 @@ def dashboard(
 def matrix_partial(
     request: Request,
     config_id: int | None = None,
-    district: str = "marvila",
+    radius_km: float = 2.0,
     session: Session = Depends(get_session),
 ):
-    """HTMX-Partial: nur die Matrix-Region (eine oder zwei Matrizen)."""
+    """HTMX-Partial: nur die Matrix-Region für den gewählten Umkreis."""
     search_config = _resolve_search_config(session, config_id)
     if search_config is None:
         return templates.TemplateResponse(
@@ -150,7 +144,7 @@ def matrix_partial(
         )
     completed_run = latest_completed_run(session, search_config)
     matrices = (
-        _matrices_for(session, search_config, district, completed_run)
+        _matrices_for(session, search_config, radius_km, completed_run)
         if completed_run is not None else []
     )
     return templates.TemplateResponse(

@@ -30,16 +30,18 @@ def test_static_app_css_is_served(client):
 
 
 def _seed_marvila(session):
-    cfg = SearchConfig(name="Marvila Slice 1",
-                       district_slugs=["marvila", "beato"])
+    cfg = SearchConfig(
+        name="Marvila Slice 1",
+        center_lat=38.7391, center_lng=-9.1048, center_label="R. Cap. Leitão 86",
+    )
     run = CrawlRun(search_config=cfg, status="completed", listings_seen=6)
     session.add(run)
     session.flush()
 
-    def add_listing(airbnb_id, district, size_class, price, reviews, title):
+    def add_listing(airbnb_id, size_class, price, reviews, title):
         listing = Listing(
-            airbnb_id=airbnb_id, city_slug="lisboa", district_slug=district,
-            lat=38.74, lng=-9.10, property_type="Apartment", bedrooms=1,
+            airbnb_id=airbnb_id, city_slug="lisboa", district_slug=None,
+            lat=38.7395, lng=-9.1050, property_type="Apartment", bedrooms=1,
             size_class=size_class, title=title, url=f"https://x/{airbnb_id}",
         )
         session.add(listing)
@@ -49,14 +51,14 @@ def _seed_marvila(session):
             price=Decimal(str(price)), review_count=reviews, rating=4.7,
         ))
 
-    # 4 Marvila-1BRs mit unterschiedlichen Preisen, klare Best-Cell.
-    add_listing("M1", "marvila", "1BR", 60, 5,  "Marvila Cosy 1BR")
-    add_listing("M2", "marvila", "1BR", 70, 8,  "Marvila Cosy 1BR Nr 2")
-    add_listing("M3", "marvila", "1BR", 250, 90, "Marvila Loft Luxe")
-    add_listing("M4", "marvila", "1BR", 260, 80, "Marvila Loft Riverside")
-    # 2 Beato-Listings.
-    add_listing("B1", "beato", "1BR", 80, 12, "Beato Studio")
-    add_listing("B2", "beato", "2BR", 130, 20, "Beato Family Flat")
+    # 6 Listings nah am Zentrum, über Größen/Preise verteilt -> alle Zellen
+    # bleiben bei Default-min_sample (3) dünn (max. 2 je Zelle).
+    add_listing("M1", "1BR", 60, 5,  "Marvila Cosy 1BR")
+    add_listing("M2", "1BR", 70, 8,  "Marvila Cosy 1BR Nr 2")
+    add_listing("M3", "1BR", 250, 90, "Marvila Loft Luxe")
+    add_listing("M4", "1BR", 260, 80, "Marvila Loft Riverside")
+    add_listing("B1", "Studio", 80, 12, "Studio am Fluss")
+    add_listing("B2", "2BR", 130, 20, "Family Flat")
     session.flush()  # KEIN commit — Test-Fixture rollt am Ende zurück.
     return cfg
 
@@ -67,7 +69,7 @@ def test_dashboard_renders_matrix_and_panel(client, db_session):
     assert response.status_code == 200
     body = response.text
     assert cfg.name in body
-    assert "Marvila" in body
+    assert "R. Cap. Leitão 86" in body
     assert "Marktübersicht" in body
     # CrawlRun-Status-Panel.
     assert "vollständig erfasst" in body
@@ -77,33 +79,31 @@ def test_dashboard_renders_matrix_and_panel(client, db_session):
     assert "geschätzte Nachfrage" in body
 
 
-
-def test_matrix_partial_returns_single_district(client, db_session):
+def test_matrix_partial_returns_umkreis_matrix(client, db_session):
     cfg = _seed_marvila(db_session)
-    response = client.get(f"/matrix?config_id={cfg.id}&district=marvila")
+    response = client.get(f"/matrix?config_id={cfg.id}&radius_km=2")
     assert response.status_code == 200
     body = response.text
-    assert "Marktübersicht Marvila" in body
-    assert "Marktübersicht Beato" not in body
+    assert "Umkreis" in body and "2 km" in body
     # Partial enthält NICHT das Layout-Root (kein <html>-Tag).
     assert "<html" not in body.lower()
 
 
-def test_matrix_partial_returns_two_matrices_for_both(client, db_session):
+def test_matrix_partial_radius_filters_cohort(client, db_session):
     cfg = _seed_marvila(db_session)
-    response = client.get(f"/matrix?config_id={cfg.id}&district=both")
+    # 1 km Umkreis enthält die nahen Listings (alle bei 38.7395/-9.1050).
+    response = client.get(f"/matrix?config_id={cfg.id}&radius_km=1")
     assert response.status_code == 200
-    body = response.text
-    assert "Marktübersicht Marvila" in body
-    assert "Marktübersicht Beato" in body
+    assert "Umkreis" in response.text
 
 
-def test_dashboard_filter_buttons_use_htmx(client, db_session):
+def test_dashboard_radius_buttons_use_htmx(client, db_session):
     cfg = _seed_marvila(db_session)
     response = client.get(f"/?config_id={cfg.id}")
     body = response.text
-    # Mindestens ein HTMX-Attribut auf den Filter-Buttons.
+    # Mindestens ein HTMX-Attribut auf den Umkreis-Buttons.
     assert "hx-get=\"/matrix?config_id=" in body
+    assert "radius_km=" in body
     assert "hx-target=\"#matrix-region\"" in body
 
 
@@ -120,14 +120,14 @@ def test_dashboard_uses_untersuchungsbereich_label(client, db_session):
     body = response.text
     assert "Untersuchungsbereich" in body
     assert "Lissabon" in body  # city_label aus city_slug = "lisboa"
+    assert "R. Cap. Leitão 86" in body
 
 
-def test_dashboard_filter_has_vergleich_button(client, db_session):
+def test_dashboard_has_radius_buttons(client, db_session):
     cfg = _seed_marvila(db_session)
     response = client.get(f"/?config_id={cfg.id}")
     body = response.text
-    assert "Vergleich" in body
-    assert "Marvila" in body and "Beato" in body
+    assert "1 km" in body and "2 km" in body and "10 km" in body
 
 
 def test_dashboard_footer_shows_datenstand(client, db_session):
@@ -265,7 +265,7 @@ def test_winner_recommendation_includes_proxy_disclaimer(client, db_session):
 
     cfg = SearchConfig(
         name="Test-Config-min1",
-        district_slugs=["marvila"],
+        center_lat=38.7391, center_lng=-9.1048, center_label="R. Cap. Leitão 86",
         classification_config={"min_sample": 1},
     )
     run = CrawlRun(search_config=cfg, status="completed", listings_seen=2)
@@ -273,8 +273,8 @@ def test_winner_recommendation_includes_proxy_disclaimer(client, db_session):
     db_session.flush()
     for i, (price, reviews) in enumerate([(100, 50), (110, 60)]):
         listing = Listing(
-            airbnb_id=f"W{i}", city_slug="lisboa", district_slug="marvila",
-            lat=38.74, lng=-9.10, property_type="Apartment", bedrooms=1,
+            airbnb_id=f"W{i}", city_slug="lisboa", district_slug=None,
+            lat=38.7395, lng=-9.1050, property_type="Apartment", bedrooms=1,
             size_class="1BR", title=f"Winner {i}", url=f"https://x/W{i}",
         )
         db_session.add(listing)
@@ -285,7 +285,7 @@ def test_winner_recommendation_includes_proxy_disclaimer(client, db_session):
         ))
     db_session.flush()
 
-    response = client.get(f"/?config_id={cfg.id}&district=marvila")
+    response = client.get(f"/?config_id={cfg.id}&radius_km=2")
     body = response.text
     assert "Empfehlung — am attraktivsten" in body
     assert "Nachfragewerte sind ein Indikator" in body

@@ -35,38 +35,26 @@
       </h2>
       <p class="mt-1 text-lg font-semibold text-slate-900">{{ search_config.name }}</p>
       <p class="text-sm text-slate-500">
-        {{ city_label }} — {{ search_config.district_slugs|map("title")|join(", ") }}
+        {{ city_label }} — Umkreis-Auswertung um
+        <span class="font-medium text-slate-700">{{ search_config.center_label or "das Zielobjekt" }}</span>
       </p>
     </section>
 
-    <nav class="mb-6 flex gap-2" aria-label="Bezirksfilter">
-      {% set districts = search_config.district_slugs %}
-      {% for slug in districts %}
+    <nav class="mb-6 flex gap-2" aria-label="Umkreis">
+      {% for r in search_config.band_radii_km %}
         <button type="button"
-                hx-get="/matrix?config_id={{ search_config.id }}&district={{ slug }}"
+                hx-get="/matrix?config_id={{ search_config.id }}&radius_km={{ r }}"
                 hx-target="#matrix-region"
                 hx-swap="innerHTML"
                 class="rounded-md border px-3 py-1.5 text-sm
-                       {% if active_district == slug %}
+                       {% if active_radius == r %}
                          border-slate-900 bg-slate-900 text-white
                        {% else %}
                          border-slate-300 bg-white text-slate-700 hover:bg-slate-100
                        {% endif %}">
-          {{ slug.title() }}
+          {{ r }} km
         </button>
       {% endfor %}
-      <button type="button"
-              hx-get="/matrix?config_id={{ search_config.id }}&district=both"
-              hx-target="#matrix-region"
-              hx-swap="innerHTML"
-              class="rounded-md border px-3 py-1.5 text-sm
-                     {% if active_district == 'both' %}
-                       border-slate-900 bg-slate-900 text-white
-                     {% else %}
-                       border-slate-300 bg-white text-slate-700 hover:bg-slate-100
-                     {% endif %}">
-        Vergleich
-      </button>
     </nav>
 
     <section id="matrix-region">
