@@ -9,6 +9,19 @@ DEFAULT_PRICE_TIERS = [
 ]
 
 
+def price_percentile(
+    price: float | Decimal | None,
+    cohort_prices: list[float | Decimal | None],
+) -> float | None:
+    """Perzentil-Rang eines Preises in der Kohorte: Anteil der Kohorten-Preise,
+    die strikt kleiner sind. Ohne Preis oder bei Kohorte < 2 Werten: None."""
+    clean = [float(p) for p in cohort_prices if p is not None]
+    if price is None or len(clean) < 2:
+        return None
+    value = float(price)
+    return sum(1 for p in clean if p < value) / len(clean)
+
+
 def price_tier(
     price: float | Decimal | None,
     cohort_prices: list[float | Decimal | None],
@@ -21,12 +34,9 @@ def price_tier(
     'price' sind. Tier-Grenzen über config['price_tiers'] justierbar.
     Ohne Preis oder bei Kohorte < 2 Werten: 'unclassified'."""
     tiers = (config or {}).get("price_tiers") or DEFAULT_PRICE_TIERS
-    clean = [float(p) for p in cohort_prices if p is not None]
-    if price is None or len(clean) < 2:
+    rank = price_percentile(price, cohort_prices)
+    if rank is None:
         return "unclassified"
-
-    value = float(price)
-    rank = sum(1 for p in clean if p < value) / len(clean)
     for name, low, high in tiers:
         if low <= rank < high:
             return name
