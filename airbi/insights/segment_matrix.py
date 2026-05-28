@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from airbi.classification.luxury import LUXURY_CLASSES, luxury_class as _luxury_class
 from airbi.classification.price import price_percentile as _price_percentile
 from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
+from airbi.geo.distance import haversine_km
 
 # Reihenfolge bestimmt die Render-Reihenfolge in der Matrix.
 SIZE_CLASSES: list[str] = ["Studio", "1BR", "2BR", "3BR+"]
@@ -74,10 +75,11 @@ class TopPerformer:
 
 @dataclass
 class SegmentMatrix:
-    """Vollständiges Insight-Ergebnis für genau einen Bezirk + einen CrawlRun."""
+    """Vollständiges Insight-Ergebnis für genau einen Umkreis + einen CrawlRun."""
 
-    district_slug: str
+    radius_km: float | None
     crawl_run_id: int | None
+    center_label: str | None = None
     size_classes: list[str] = field(default_factory=lambda: list(SIZE_CLASSES))
     luxury_classes: list[str] = field(default_factory=lambda: list(LUXURY_CLASSES))
     cells: dict[tuple[str, str], Cell] = field(default_factory=dict)
@@ -105,19 +107,16 @@ def _empty_grid() -> dict[tuple[str, str], Cell]:
     }
 
 
-def _district_label(slug: str) -> str:
-    """Hübscher Anzeigename für einen Bezirks-Slug ('marvila' -> 'Marvila')."""
-    return slug.replace("-", " ").replace("_", " ").title()
-
-
 def _build_recommendation(matrix: SegmentMatrix) -> str:
     """Formuliert den Empfehlungssatz aus der gefüllten Matrix."""
-    label = _district_label(matrix.district_slug)
+    label = matrix.center_label or "dem Zielobjekt"
+    radius = f"{matrix.radius_km:g}"
     if matrix.best_cell is None:
         return (
-            f"Für {label} liefert dieser Crawl noch keine Zelle mit mindestens "
-            f"{matrix.min_sample} vergleichbaren Objekten — die Datenbasis ist "
-            f"für eine belastbare Empfehlung zu dünn."
+            f"Im Umkreis von {radius} km um {label} liefert dieser Crawl noch "
+            f"keine Zelle mit mindestens {matrix.min_sample} vergleichbaren "
+            f"Objekten — die Datenbasis ist für eine belastbare Empfehlung zu "
+            f"dünn."
         )
     size, luxury = matrix.best_cell
     cell = matrix.cell(size, luxury)
@@ -125,10 +124,11 @@ def _build_recommendation(matrix: SegmentMatrix) -> str:
     adr = int(cell.adr) if cell.adr is not None else 0
     rate_pct = int(round(matrix.review_rate * 100))
     return (
-        f"Für {label} ist {size}-{luxury} am attraktivsten — Ø {score:.0f} "
-        f"Reviews je Listing bei {cell.n} Wettbewerber-Listings, "
-        f"Median-ADR €{adr}. Nachfrage ist ein Proxy aus Review-Count "
-        f"(~{rate_pct}% der Gäste bewerten), keine gemessene Auslastung."
+        f"Im Umkreis von {radius} km um {label} ist {size}-{luxury} am "
+        f"attraktivsten — Ø {score:.0f} Reviews je Listing bei {cell.n} "
+        f"Wettbewerber-Listings, Median-ADR €{adr}. Nachfrage ist ein Proxy "
+        f"aus Review-Count (~{rate_pct}% der Gäste bewerten), keine gemessene "
+        f"Auslastung."
     )
 
 
@@ -167,14 +167,15 @@ def build_segment_matrix(
     rows: list[ListingRow],
     *,
     config: dict | None,
-    district_slug: str,
+    radius_km: float | None,
+    center_label: str | None,
     crawl_run_id: int | None,
 ) -> SegmentMatrix:
-    """Reine Aggregation der Segment-Matrix für genau einen Bezirk.
+    """Reine Aggregation der Segment-Matrix für genau einen Umkreis.
 
     - Verteilt jeden ListingRow auf eine (size_class, luxury_class)-Zelle.
-    - `luxury_class` wird aus price_percentile (Bezirks-Kohort) × amenity_score
-      berechnet (Spec §5.5/§8: immer innerhalb des Bezirks).
+    - `luxury_class` wird aus price_percentile (Umkreis-Kohorte) × amenity_score
+      berechnet (Spec §8: immer innerhalb des gewählten Umkreises).
     - Zellen unter cfg['min_sample'] gelten als 'dünn' und scheiden aus der
       Best-Cell-Wahl aus.
     - `heat` 0-4 skaliert relativ zum besten nicht-dünnen Score.
@@ -229,7 +230,8 @@ def build_segment_matrix(
             cell.heat = max(1, min(4, round(cell.score / max_score * 4)))
 
     matrix = SegmentMatrix(
-        district_slug=district_slug,
+        radius_km=radius_km,
+        center_label=center_label,
         crawl_run_id=crawl_run_id,
         cells=cells,
         best_cell=best_cell,
@@ -261,11 +263,11 @@ def latest_completed_run(
 def compute_segment_matrix(
     session: Session,
     search_config: SearchConfig,
-    district_slug: str,
+    radius_km: float,
     crawl_run: CrawlRun,
 ) -> SegmentMatrix:
-    """Lädt die Listings + Snapshots aus crawl_run für einen Bezirk und ruft
-    den reinen Builder."""
+    """Lädt alle Listings+Snapshots des Runs und filtert per Distanz zum
+    Zielobjekt auf den gewählten Umkreis, dann ruft den reinen Builder."""
     # SessionLocal nutzt autoflush=False — Pending Writes der gleichen
     # Unit-of-Work müssen vor dem SELECT explizit sichtbar gemacht werden,
     # damit Tests/Routen, die direkt vor der Insight schreiben, das Ergebnis
@@ -276,24 +278,32 @@ def compute_segment_matrix(
         .join(Snapshot, Snapshot.listing_id == Listing.id)
         .where(Snapshot.crawl_run_id == crawl_run.id)
         .where(Listing.city_slug == search_config.city_slug)
-        .where(Listing.district_slug == district_slug)
     )
-    rows = [
-        ListingRow(
-            airbnb_id=listing.airbnb_id,
-            title=listing.title,
-            url=listing.url,
-            size_class=listing.size_class or "unclassified",
-            price=snap.price,
-            review_count=snap.review_count or 0,
-            rating=snap.rating,
-            amenity_score=listing.amenity_score or 0.0,
-        )
-        for listing, snap in session.execute(stmt).all()
-    ]
+    center_lat = search_config.center_lat
+    center_lng = search_config.center_lng
+    rows: list[ListingRow] = []
+    if center_lat is not None and center_lng is not None:
+        for listing, snap in session.execute(stmt).all():
+            if listing.lat is None or listing.lng is None:
+                continue
+            if haversine_km(center_lat, center_lng, listing.lat, listing.lng) > radius_km:
+                continue
+            rows.append(
+                ListingRow(
+                    airbnb_id=listing.airbnb_id,
+                    title=listing.title,
+                    url=listing.url,
+                    size_class=listing.size_class or "unclassified",
+                    price=snap.price,
+                    review_count=snap.review_count or 0,
+                    rating=snap.rating,
+                    amenity_score=listing.amenity_score or 0.0,
+                )
+            )
     return build_segment_matrix(
         rows,
         config=search_config.classification_config or {},
-        district_slug=district_slug,
+        radius_km=radius_km,
+        center_label=search_config.center_label,
         crawl_run_id=crawl_run.id,
     )
