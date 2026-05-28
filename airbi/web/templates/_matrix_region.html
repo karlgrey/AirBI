@@ -28,8 +28,8 @@
             <thead>
               <tr>
                 <th class="w-32 text-left text-xs font-medium uppercase
-                           tracking-wide text-slate-500">Apartment-Größe ↓ / Preisklasse →</th>
-                {% for tier in matrix.price_tiers %}
+                           tracking-wide text-slate-500">Apartment-Größe ↓ / Luxusklasse →</th>
+                {% for tier in matrix.luxury_classes %}
                   <th class="px-2 py-1 text-left text-xs font-medium uppercase
                              tracking-wide text-slate-500">{{ tier }}</th>
                 {% endfor %}
@@ -46,7 +46,7 @@
                     {% elif size == "3BR+" %}3+ Schlafzimmer
                     {% else %}{{ size }}{% endif %}
                   </th>
-                  {% for tier in matrix.price_tiers %}
+                  {% for tier in matrix.luxury_classes %}
                     {% set cell = matrix.cell(size, tier) %}
                     <td class="rounded p-2 align-top
                                {% if cell.heat == 4 %}bg-emerald-500 text-white
@@ -57,7 +57,7 @@
                                {% if matrix.best_cell == (size, tier) %}
                                  ring-2 ring-amber-500
                                {% endif %}"
-                        title="{{ size }} · {{ tier }} — Durchschnittliche Bewertungen je Apartment, Anzahl Wettbewerber und Mittel-Preis pro Nacht. Attraktivität wird per Bewertungen ÷ Wettbewerber bestimmt.">
+                        title="{{ size }} · {{ tier }} — Durchschnittliche Bewertungen je Apartment, Anzahl Wettbewerber und Mittel-Preis pro Nacht. Die Luxusklasse kombiniert Preis und Ausstattung.">
                       {% if cell.n == 0 %}
                         <span class="text-xs">—</span>
                       {% else %}
@@ -108,7 +108,7 @@
                       {% elif perf.size_class == "2BR" %}2 SZ
                       {% elif perf.size_class == "3BR+" %}3+ SZ
                       {% else %}{{ perf.size_class }}{% endif %}
-                      · {{ perf.price_tier }}
+                      · {{ perf.luxury_class }}
                     </span>
                   </div>
                   <div class="text-xs text-slate-500">
