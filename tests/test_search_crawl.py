@@ -80,21 +80,20 @@ def test_merge_detail_fills_room_counts():
     assert merged.review_count == 10
 
 
-def test_persist_results_creates_listing_snapshot_district_and_size_class(db_session):
+def test_persist_results_creates_listing_snapshot_and_size_class(db_session):
     cfg = SearchConfig(name="Marvila Crawl", district_slugs=["marvila", "beato"])
     run = CrawlRun(search_config=cfg, status="running")
     db_session.add(run)
     db_session.flush()
-    districts = load_districts()
 
     pl = merge_detail(
         _parsed("A1", 38.7390, -9.1044),
         ListingDetail(bedrooms=1, beds=2, bathrooms=1.0, max_guests=2),
     )
-    persist_results(db_session, run, [pl], districts)
+    persist_results(db_session, run, [pl])
 
     listing = db_session.query(Listing).filter_by(airbnb_id="A1").one()
-    assert listing.district_slug == "marvila"
+    assert listing.district_slug is None
     assert listing.size_class == "1BR"
     assert listing.bedrooms == 1
     snap = db_session.query(Snapshot).filter_by(listing_id=listing.id).one()
@@ -104,16 +103,15 @@ def test_persist_results_creates_listing_snapshot_district_and_size_class(db_ses
 
 def test_persist_results_upserts_listing_on_second_crawl(db_session):
     cfg = SearchConfig(name="Marvila Crawl", district_slugs=["marvila"])
-    districts = load_districts()
     run1 = CrawlRun(search_config=cfg, status="running")
     db_session.add(run1)
     db_session.flush()
-    persist_results(db_session, run1, [_parsed("A1", 38.7390, -9.1044, review_count=10)], districts)
+    persist_results(db_session, run1, [_parsed("A1", 38.7390, -9.1044, review_count=10)])
 
     run2 = CrawlRun(search_config=cfg, status="running")
     db_session.add(run2)
     db_session.flush()
-    persist_results(db_session, run2, [_parsed("A1", 38.7390, -9.1044, review_count=25)], districts)
+    persist_results(db_session, run2, [_parsed("A1", 38.7390, -9.1044, review_count=25)])
 
     assert db_session.query(Listing).filter_by(airbnb_id="A1").count() == 1
     assert db_session.query(Snapshot).count() == 2
@@ -132,21 +130,11 @@ def test_merge_detail_fills_amenities_and_description():
     assert merged.bedrooms == 2 and merged.max_guests == 4
 
 
-def test_persist_results_marks_point_outside_polygons_unassigned(db_session):
-    cfg = SearchConfig(name="X", district_slugs=["marvila"])
-    run = CrawlRun(search_config=cfg, status="running")
-    db_session.add(run)
-    db_session.flush()
-    persist_results(db_session, run, [_parsed("OUT", 38.5, -9.5)], load_districts())
-    assert db_session.query(Listing).filter_by(airbnb_id="OUT").one().district_slug == "unassigned"
-
-
 def test_persist_results_writes_amenities_and_amenity_score(db_session):
     cfg = SearchConfig(name="Lux", district_slugs=["marvila"])
     run = CrawlRun(search_config=cfg, status="running")
     db_session.add(run)
     db_session.flush()
-    districts = load_districts()
 
     pl = merge_detail(
         _parsed("LX1", 38.7390, -9.1044),
@@ -154,7 +142,7 @@ def test_persist_results_writes_amenities_and_amenity_score(db_session):
                       amenities=["River view", "Air conditioning", "Pool"],
                       description="Loft mit Blick"),
     )
-    persist_results(db_session, run, [pl], districts)
+    persist_results(db_session, run, [pl])
 
     listing = db_session.query(Listing).filter_by(airbnb_id="LX1").one()
     assert listing.amenities == ["River view", "Air conditioning", "Pool"]

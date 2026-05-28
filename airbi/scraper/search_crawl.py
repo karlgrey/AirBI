@@ -116,14 +116,12 @@ def persist_results(
     session: "Session",
     crawl_run: "CrawlRun",
     parsed_listings: list[ParsedListing],
-    districts: dict[str, "BaseGeometry"],
 ) -> int:
     """Schreibt Listings und Snapshots in die Datenbank (Upsert-Logik).
 
     Pro ParsedListing:
     - Sucht ein Listing nach (city_slug, airbnb_id); bei Fund → Update, sonst
       neuer Eintrag.
-    - Ordnet per `assign_district` einem District zu (oder 'unassigned').
     - Berechnet `size_class` via Schlafzimmerzahl.
     - Erstellt immer einen neuen Snapshot für den aktuellen CrawlRun.
 
@@ -137,12 +135,6 @@ def persist_results(
     cls_config = crawl_run.search_config.classification_config or {}
 
     for pl in parsed_listings:
-        # District-Zuweisung
-        if pl.lat is not None and pl.lng is not None:
-            district = assign_district(pl.lat, pl.lng, districts)
-        else:
-            district = "unassigned"
-
         # Größenklasse
         sc = _size_class(pl.bedrooms)
 
@@ -157,7 +149,7 @@ def persist_results(
             session.add(listing)
 
         # Stammdaten immer aktualisieren
-        listing.district_slug = district
+        listing.district_slug = None
         listing.size_class = sc
         listing.title = pl.title
         listing.url = pl.url
@@ -428,7 +420,7 @@ def run_search_crawl(
                 human_delay(*DEFAULT_PAGE_DELAY)
 
         # --- Persistieren ---
-        count = persist_results(session, run, final_listings, all_districts)
+        count = persist_results(session, run, final_listings)
         run.status = "completed"
         run.listings_seen = count
         run.finished_at = datetime.now(timezone.utc)
