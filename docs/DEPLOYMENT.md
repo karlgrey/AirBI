@@ -10,7 +10,7 @@
 | Host | `deploy@labs.remoterepublic.com` (Ubuntu 24.04, geteilt mit anderen Apps) |
 | Code | `/opt/airbi` (git-clone via Read-only-Deploy-Key, Branch `main`) |
 | Service | systemd-Unit `airbi-web` → uvicorn auf `127.0.0.1:8000` |
-| Reverse-Proxy | Caddy (`/etc/caddy/Caddyfile`, Block `airbi.remoterepublic.com`), Auto-TLS via Let's Encrypt |
+| Reverse-Proxy | Caddy (`/etc/caddy/Caddyfile`, Block `airbi.remoterepublic.com`), Auto-TLS via Let's Encrypt, **HTTP Basic Auth** (user `airbi`) |
 | Datenbank | PostgreSQL (lokal), Rolle + DB `airbi` |
 | Secret | `/opt/airbi/.env` (`DATABASE_URL`, `chmod 600`, deploy-owned, gitignored) |
 | Paket-Manager | `uv` (`~/.local/bin/uv`), venv unter `/opt/airbi/.venv` |
@@ -19,6 +19,8 @@
 
 - **systemd:** `/etc/systemd/system/airbi-web.service` — `Restart=always`, lädt `EnvironmentFile=/opt/airbi/.env`, `ExecStart=/home/deploy/.local/bin/uv run --no-dev airbi web --host 127.0.0.1 --port 8000`.
 - **Caddy-Block:** reverse_proxy → `localhost:8000`, Healthcheck auf `/health`, HSTS-/Security-Header. HTTP→HTTPS-Redirect automatisch.
+- **Basic Auth:** `basic_auth`-Direktive im AirBI-Block schützt das Dashboard (niedrigschwellig, nur gegen Crawler/Neugierige). User `airbi`, Passwort als bcrypt-Hash in der Caddyfile (Klartext bewusst **nicht** im Repo). Caddys aktiver Healthcheck geht direkt zum Backend und ist von der Auth unberührt.
+  - **Passwort ändern:** `caddy hash-password --plaintext 'NEU'` → den Hash in der `basic_auth { airbi <hash> }`-Zeile ersetzen → `sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
 - **DB:** Schema via Alembic (`alembic upgrade head`). Daten initial per `pg_dump --data-only` vom Dev-Rechner eingespielt.
 
 ## Update-Pfad (neue Version ausrollen)
