@@ -58,3 +58,18 @@ def test_snapshot_links_listing_and_crawl_run(db_session):
     assert snap.price == Decimal("120.00")
     assert snap.review_count == 42
     assert snap.listing.airbnb_id == "999"
+
+
+def test_listing_stores_amenity_score_and_amenities(db_session):
+    from airbi.db.models import Listing
+    listing = Listing(
+        airbnb_id="AS1", city_slug="lisboa", lat=38.74, lng=-9.10,
+        amenity_score=0.73, amenities=["River view", "Pool"],
+        description="Tolle Aussicht",
+    )
+    db_session.add(listing)
+    db_session.flush()
+    got = db_session.query(Listing).filter_by(airbnb_id="AS1").one()
+    assert got.amenity_score == 0.73
+    assert got.amenities == ["River view", "Pool"]
+    assert got.description == "Tolle Aussicht"

@@ -83,6 +83,7 @@ class Listing(Base):
     host_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     is_superhost: Mapped[bool] = mapped_column(Boolean, default=False)
     size_class: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    amenity_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Reserviert für Phase 2 / Detail-Crawl (Spec §5.3)
     license_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
     al_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
