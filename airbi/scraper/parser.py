@@ -189,6 +189,65 @@ def _collect_overview_items(payload: dict) -> list[dict]:
     return items
 
 
+def _extract_amenities(payload: dict) -> list[str]:
+    """Verfügbare Amenity-Titel aus pdpPresentation.amenities.seeAllAmenitiesGroups.
+    Nur Items mit available==True; dedupliziert, Reihenfolge erhalten."""
+    # niobeClientData ist eine Liste; defensiv zum pdpPresentation navigieren
+    try:
+        pdp = payload["niobeClientData"][0][1]["data"]["node"]["pdpPresentation"]
+        all_groups = pdp["amenities"]["seeAllAmenitiesGroups"]
+    except (KeyError, IndexError, TypeError):
+        return []
+    if not isinstance(all_groups, list):
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for g in all_groups:
+        items = (g or {}).get("amenities") or (g or {}).get("items") or []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            # Spec §6: nur available == True (fehlend/None gilt als nicht verfügbar)
+            if it.get("available") is not True:
+                continue
+            title = it.get("title")
+            if isinstance(title, str) and title and title not in seen:
+                seen.add(title)
+                out.append(title)
+    return out
+
+
+def _extract_description(payload: dict) -> str | None:
+    """Kurzbeschreibung aus pdpPresentation.descriptions, HTML-Tags gestrippt."""
+    try:
+        descs = payload["niobeClientData"][0][1]["data"]["node"]["pdpPresentation"]["descriptions"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    raw = None
+    if isinstance(descs, dict):
+        short = descs.get("shortDescriptionHtml")
+        long = descs.get("longDescriptionHtml")
+        for cand in (short, long):
+            if isinstance(cand, dict):
+                # Text kann direkt im cand liegen ODER eine Ebene tiefer unter "content".
+                inner = cand.get("content") if isinstance(cand.get("content"), dict) else cand
+                raw = (
+                    inner.get("localizedStringWithTranslationPreference")
+                    or inner.get("localizedString")
+                    or (inner.get("content") if isinstance(inner.get("content"), str) else None)
+                )
+                if raw:
+                    break
+            elif isinstance(cand, str) and cand:
+                raw = cand
+                break
+    if not isinstance(raw, str) or not raw:
+        return None
+    text = re.sub(r"<[^>]+>", " ", raw)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None
+
+
 def parse_listing_detail(payload: dict) -> ListingDetail:
     """Extrahiert Raumzahlen aus dem Airbnb-Detailseiten-Payload.
 
@@ -269,11 +328,16 @@ def parse_listing_detail(payload: dict) -> ListingDetail:
     except Exception:
         pass
 
+    amenities = _extract_amenities(payload)
+    description = _extract_description(payload)
+
     return ListingDetail(
         bedrooms=bedrooms,
         beds=beds,
         bathrooms=bathrooms,
         max_guests=max_guests,
+        amenities=amenities,
+        description=description,
     )
 
 

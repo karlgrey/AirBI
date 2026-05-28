@@ -166,7 +166,7 @@ def test_matrix_uses_klartext_size_labels(client, db_session):
     assert "3+ Schlafzimmer" in body
     assert "Studio" in body
     assert "Apartment-Größe" in body
-    assert "Preisklasse" in body
+    assert "Luxusklasse" in body
 
 
 def test_matrix_cell_uses_klartext_metrics(client, db_session):
@@ -290,3 +290,11 @@ def test_winner_recommendation_includes_proxy_disclaimer(client, db_session):
     assert "Empfehlung — am attraktivsten" in body
     assert "Nachfragewerte sind ein Indikator" in body
     assert "% der Gäste bewerten" in body
+
+
+def test_matrix_axis_is_luxusklasse(client, db_session):
+    _seed_marvila(db_session)
+    response = client.get("/")
+    body = response.text
+    assert "Luxusklasse" in body
+    assert "Preis und Ausstattung" in body

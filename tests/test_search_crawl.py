@@ -120,6 +120,18 @@ def test_persist_results_upserts_listing_on_second_crawl(db_session):
     assert db_session.query(Snapshot).filter_by(crawl_run_id=run2.id).one().review_count == 25
 
 
+def test_merge_detail_fills_amenities_and_description():
+    pl = _parsed("1", 38.74, -9.10)
+    detail = ListingDetail(
+        bedrooms=2, beds=3, bathrooms=1.5, max_guests=4,
+        amenities=["River view", "Air conditioning"], description="Schöne Wohnung",
+    )
+    merged = merge_detail(pl, detail)
+    assert merged.amenities == ["River view", "Air conditioning"]
+    assert merged.description == "Schöne Wohnung"
+    assert merged.bedrooms == 2 and merged.max_guests == 4
+
+
 def test_persist_results_marks_point_outside_polygons_unassigned(db_session):
     cfg = SearchConfig(name="X", district_slugs=["marvila"])
     run = CrawlRun(search_config=cfg, status="running")
@@ -127,3 +139,25 @@ def test_persist_results_marks_point_outside_polygons_unassigned(db_session):
     db_session.flush()
     persist_results(db_session, run, [_parsed("OUT", 38.5, -9.5)], load_districts())
     assert db_session.query(Listing).filter_by(airbnb_id="OUT").one().district_slug == "unassigned"
+
+
+def test_persist_results_writes_amenities_and_amenity_score(db_session):
+    cfg = SearchConfig(name="Lux", district_slugs=["marvila"])
+    run = CrawlRun(search_config=cfg, status="running")
+    db_session.add(run)
+    db_session.flush()
+    districts = load_districts()
+
+    pl = merge_detail(
+        _parsed("LX1", 38.7390, -9.1044),
+        ListingDetail(bedrooms=2, beds=2, bathrooms=1.0, max_guests=2,
+                      amenities=["River view", "Air conditioning", "Pool"],
+                      description="Loft mit Blick"),
+    )
+    persist_results(db_session, run, [pl], districts)
+
+    listing = db_session.query(Listing).filter_by(airbnb_id="LX1").one()
+    assert listing.amenities == ["River view", "Air conditioning", "Pool"]
+    assert listing.description == "Loft mit Blick"
+    assert listing.amenity_score is not None and 0.0 <= listing.amenity_score <= 1.0
+    assert listing.amenity_score > 0.2

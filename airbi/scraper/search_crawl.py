@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from airbi.classification.amenity import amenity_score as _amenity_score
 from airbi.classification.size import size_class as _size_class
 from airbi.geo.districts import assign_district, load_districts
 from airbi.scraper.models import ListingDetail, ParsedListing
@@ -94,7 +95,7 @@ def is_entire_home(parsed_listing: ParsedListing) -> bool:
 # ---------------------------------------------------------------------------
 
 def merge_detail(parsed_listing: ParsedListing, detail: ListingDetail) -> ParsedListing:
-    """Gibt ein neues ParsedListing zurück, dessen Zimmerfelder aus `detail`
+    """Gibt ein neues ParsedListing zurück, dessen Detail-Felder aus `detail`
     stammen. Alle anderen Felder bleiben unverändert."""
     return dataclasses.replace(
         parsed_listing,
@@ -102,6 +103,8 @@ def merge_detail(parsed_listing: ParsedListing, detail: ListingDetail) -> Parsed
         beds=detail.beds,
         bathrooms=detail.bathrooms,
         max_guests=detail.max_guests,
+        amenities=detail.amenities,
+        description=detail.description,
     )
 
 
@@ -131,6 +134,7 @@ def persist_results(
     from airbi.db.models import Listing, Snapshot  # lokaler Import → kein Zirkelbezug
 
     city_slug = crawl_run.search_config.city_slug
+    cls_config = crawl_run.search_config.classification_config or {}
 
     for pl in parsed_listings:
         # District-Zuweisung
@@ -166,6 +170,17 @@ def persist_results(
         listing.max_guests = pl.max_guests
         listing.host_name = pl.host_name
         listing.is_superhost = pl.is_superhost
+        listing.amenities = pl.amenities
+        listing.description = pl.description
+        listing.amenity_score = _amenity_score(
+            pl.amenities,
+            beds=pl.beds,
+            bedrooms=pl.bedrooms,
+            max_guests=pl.max_guests,
+            is_superhost=pl.is_superhost,
+            rating=pl.rating,
+            config=cls_config,
+        )
 
         session.flush()  # sichert listing.id für die FK-Beziehung
 
