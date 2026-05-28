@@ -27,6 +27,8 @@ class ParsedListing:
     review_count: int
     rating: float | None
     search_position: int | None
+    amenities: list[str] | None = None
+    description: str | None = None
 
 
 @dataclass

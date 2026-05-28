@@ -94,7 +94,7 @@ def is_entire_home(parsed_listing: ParsedListing) -> bool:
 # ---------------------------------------------------------------------------
 
 def merge_detail(parsed_listing: ParsedListing, detail: ListingDetail) -> ParsedListing:
-    """Gibt ein neues ParsedListing zurück, dessen Zimmerfelder aus `detail`
+    """Gibt ein neues ParsedListing zurück, dessen Detail-Felder aus `detail`
     stammen. Alle anderen Felder bleiben unverändert."""
     return dataclasses.replace(
         parsed_listing,
@@ -102,6 +102,8 @@ def merge_detail(parsed_listing: ParsedListing, detail: ListingDetail) -> Parsed
         beds=detail.beds,
         bathrooms=detail.bathrooms,
         max_guests=detail.max_guests,
+        amenities=detail.amenities,
+        description=detail.description,
     )
 
 

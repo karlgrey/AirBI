@@ -120,6 +120,18 @@ def test_persist_results_upserts_listing_on_second_crawl(db_session):
     assert db_session.query(Snapshot).filter_by(crawl_run_id=run2.id).one().review_count == 25
 
 
+def test_merge_detail_fills_amenities_and_description():
+    pl = _parsed("1", 38.74, -9.10)
+    detail = ListingDetail(
+        bedrooms=2, beds=3, bathrooms=1.5, max_guests=4,
+        amenities=["River view", "Air conditioning"], description="Schöne Wohnung",
+    )
+    merged = merge_detail(pl, detail)
+    assert merged.amenities == ["River view", "Air conditioning"]
+    assert merged.description == "Schöne Wohnung"
+    assert merged.bedrooms == 2 and merged.max_guests == 4
+
+
 def test_persist_results_marks_point_outside_polygons_unassigned(db_session):
     cfg = SearchConfig(name="X", district_slugs=["marvila"])
     run = CrawlRun(search_config=cfg, status="running")
