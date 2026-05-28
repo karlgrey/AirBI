@@ -22,6 +22,7 @@
 - **Basic Auth:** `basic_auth`-Direktive im AirBI-Block schützt das Dashboard (niedrigschwellig, nur gegen Crawler/Neugierige). User `airbi`, Passwort als bcrypt-Hash in der Caddyfile (Klartext bewusst **nicht** im Repo). Caddys aktiver Healthcheck geht direkt zum Backend und ist von der Auth unberührt.
   - **Passwort ändern:** `caddy hash-password --plaintext 'NEU'` → den Hash in der `basic_auth { airbi <hash> }`-Zeile ersetzen → `sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
 - **DB:** Schema via Alembic (`alembic upgrade head`). Daten initial per `pg_dump --data-only` vom Dev-Rechner eingespielt.
+- **Suchgebiet/Auswertung:** Distanzbasierte Umkreis-Bänder um das Zielobjekt (kein Bezirks-Modell mehr). Die `search_config` braucht `center_lat`/`center_lng`/`center_label` + `band_radii_km` — nach der Migration `b2c3d4e5f6a7` einmalig setzen (siehe „Daten aktualisieren"). Die Auswertung filtert pro Umkreis zur Query-Zeit (Dashboard-Schalter 1/2/3/5/10 km); Re-Crawl zum Umschalten nicht nötig.
 
 ## Update-Pfad (neue Version ausrollen)
 
@@ -43,6 +44,13 @@ curl -s localhost:8000/health                  # {"status":"ok"} erwarten
 - **Caddyfile-Backups:** `/etc/caddy/Caddyfile.bak-airbi-<timestamp>`
 
 ## Daten aktualisieren
+
+**Einmalig nach Migration `b2c3d4e5f6a7`** — Umkreis-Felder der Config setzen:
+```sql
+UPDATE search_config SET center_lat=38.7391, center_lng=-9.1048,
+  center_label='R. Cap. Leitão 86', band_radii_km='[1, 2, 3, 5, 10]'
+WHERE name='Marvila Slice 1';
+```
 
 Der Crawl läuft **nicht** auf dem Server (braucht Residential-IP). Neue Daten kommen per Dump/Restore vom Dev-Rechner:
 
