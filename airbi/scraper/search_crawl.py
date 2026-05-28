@@ -13,44 +13,15 @@ from typing import TYPE_CHECKING
 
 from airbi.classification.amenity import amenity_score as _amenity_score
 from airbi.classification.size import size_class as _size_class
-from airbi.geo.districts import assign_district, load_districts
+from airbi.geo.distance import concentric_boxes, haversine_km
 from airbi.scraper.models import ListingDetail, ParsedListing
 
 if TYPE_CHECKING:
-    from shapely.geometry.base import BaseGeometry
     from sqlalchemy.orm import Session
 
     from airbi.db.models import CrawlRun, SearchConfig
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# (a) bounding_box_for
-# ---------------------------------------------------------------------------
-
-def bounding_box_for(
-    districts: dict[str, "BaseGeometry"],
-    margin: float = 0.003,
-) -> tuple[float, float, float, float]:
-    """Berechnet eine Bounding-Box, die alle District-Polygone umschließt.
-
-    GeoJSON/Shapely `bounds` liefert (min_lng, min_lat, max_lng, max_lat).
-    Rückgabe: (sw_lat, sw_lng, ne_lat, ne_lng) — für die Airbnb-URL.
-    """
-    min_lngs, min_lats, max_lngs, max_lats = [], [], [], []
-    for geom in districts.values():
-        min_lng, min_lat, max_lng, max_lat = geom.bounds
-        min_lngs.append(min_lng)
-        min_lats.append(min_lat)
-        max_lngs.append(max_lng)
-        max_lats.append(max_lat)
-
-    sw_lat = min(min_lats) - margin
-    sw_lng = min(min_lngs) - margin
-    ne_lat = max(max_lats) + margin
-    ne_lng = max(max_lngs) + margin
-    return sw_lat, sw_lng, ne_lat, ne_lng
-
 
 # ---------------------------------------------------------------------------
 # (b) is_entire_home
@@ -298,26 +269,25 @@ def run_search_crawl(
         return search_results, page_cursors
 
     try:
-        all_districts = load_districts()
-        # Nur die in der Config genannten Distrikte für die Bounding-Box
-        if search_config.district_slugs:
-            relevant = {
-                slug: geom
-                for slug, geom in all_districts.items()
-                if slug in search_config.district_slugs
-            }
-        else:
-            relevant = all_districts
-        if not relevant:
-            relevant = all_districts
+        center_lat = search_config.center_lat
+        center_lng = search_config.center_lng
+        radii = search_config.band_radii_km or [1, 2, 3, 5, 10]
+        if center_lat is None or center_lng is None:
+            run.status = "failed"
+            run.message = "SearchConfig ohne center_lat/center_lng — Umkreis-Crawl nicht möglich."
+            run.finished_at = datetime.now(timezone.utc)
+            session.commit()
+            return run
+        max_radius = max(radii)
+        boxes = concentric_boxes(center_lat, center_lng, radii)
 
-        sw_lat, sw_lng, ne_lat, ne_lng = bounding_box_for(relevant)
-
-        base_search_url = (
-            "https://www.airbnb.com/s/Lisboa--Portugal/homes"
-            f"?ne_lat={ne_lat}&ne_lng={ne_lng}&sw_lat={sw_lat}&sw_lng={sw_lng}"
-            "&search_by_map=true&zoom=14"
-        )
+        def _search_url(box: tuple[float, float, float, float]) -> str:
+            sw_lat, sw_lng, ne_lat, ne_lng = box
+            return (
+                "https://www.airbnb.com/s/Lisboa--Portugal/homes"
+                f"?ne_lat={ne_lat}&ne_lng={ne_lng}&sw_lat={sw_lat}&sw_lng={sw_lng}"
+                "&search_by_map=true&zoom=14"
+            )
 
         parsed_listings: dict[str, ParsedListing] = {}
 
@@ -325,75 +295,71 @@ def run_search_crawl(
             page = ctx.new_page()
 
             # ----------------------------------------------------------
-            # Seite 1 laden (kein Cursor)
+            # Über alle konzentrischen Boxen iterieren (Strategie B).
+            # Ergebnisse werden über alle Boxen per airbnb_id dedupliziert.
             # ----------------------------------------------------------
-            first_results, page_cursors = _fetch_search_page(page, base_search_url, 1)
+            for box_idx, box in enumerate(boxes, start=1):
+                base_search_url = _search_url(box)
 
-            # Block auf Seite 1 → abbrechen
-            if not first_results and not page_cursors:
-                # Prüfe nochmal ob es ein echtes Block war
-                html_check = page.content().lower()
-                if "hcaptcha" in html_check or "access denied" in html_check:
-                    run.status = "failed"
-                    run.message = "CAPTCHA oder Block-Page erkannt."
-                    run.finished_at = datetime.now(timezone.utc)
-                    session.commit()
-                    return run
+                first_results, page_cursors = _fetch_search_page(
+                    page, base_search_url, 1
+                )
 
-            # 0-Treffer-Guard: prüft searchResults (was der Parser liest)
-            if not first_results:
+                if not first_results and not page_cursors:
+                    html_check = page.content().lower()
+                    if "hcaptcha" in html_check or "access denied" in html_check:
+                        logger.warning("Box %d: Block/CAPTCHA — übersprungen.", box_idx)
+                        continue
+
+                if not first_results:
+                    logger.info("Box %d: keine Ergebnisse — übersprungen.", box_idx)
+                    continue
+
+                for pl in parse_search_results(
+                    {"data": {"presentation": {"staysSearch": {"results": {"searchResults": first_results}}}}}
+                ):
+                    parsed_listings[pl.airbnb_id] = pl
+
+                logger.info(
+                    "Box %d (von %d): Seite 1 = %d Ergebnisse, %d Cursor",
+                    box_idx, len(boxes), len(first_results), len(page_cursors),
+                )
+
+                for page_idx, cursor in enumerate(page_cursors[1:_MAX_PAGES], start=2):
+                    human_delay(*DEFAULT_PAGE_DELAY)
+                    encoded_cursor = urllib.parse.quote(cursor)
+                    page_url = base_search_url + f"&cursor={encoded_cursor}"
+
+                    page_results, _ = _fetch_search_page(page, page_url, page_idx)
+                    if not page_results:
+                        continue
+                    for pl in parse_search_results(
+                        {"data": {"presentation": {"staysSearch": {"results": {"searchResults": page_results}}}}}
+                    ):
+                        parsed_listings[pl.airbnb_id] = pl
+
+                human_delay(*DEFAULT_PAGE_DELAY)
+
+            # Gesamtschutz: keine einzige Box lieferte Ergebnisse.
+            if not parsed_listings:
                 run.status = "failed"
-                run.message = "Keine Suchergebnisse zurückgegeben (0 Listings)."
+                run.message = "Keine Suchergebnisse über alle Boxen (0 Listings)."
                 run.finished_at = datetime.now(timezone.utc)
                 session.commit()
                 return run
 
-            # Seite 1 einlesen
-            for pl in parse_search_results(
-                {"data": {"presentation": {"staysSearch": {"results": {"searchResults": first_results}}}}}
-            ):
-                parsed_listings[pl.airbnb_id] = pl
+            # --- Entire-Home-Filter + Distanz-Vorfilter (max. Radius) ---
+            def _in_radius(pl: ParsedListing) -> bool:
+                if pl.lat is None or pl.lng is None:
+                    return False
+                return haversine_km(center_lat, center_lng, pl.lat, pl.lng) <= max_radius
 
-            logger.info("Seite 1: %d Ergebnisse, %d Cursor verfügbar", len(first_results), len(page_cursors))
-
-            # ----------------------------------------------------------
-            # Seiten 2…N (Cursor-Paginierung)
-            # Cursor[0] = Seite 1 (offset 0), ab Cursor[1] = Seite 2
-            # URL-Parameter: &cursor=<base64-token>
-            # ----------------------------------------------------------
-            for page_idx, cursor in enumerate(page_cursors[1:_MAX_PAGES], start=2):
-                human_delay(*DEFAULT_PAGE_DELAY)
-                encoded_cursor = urllib.parse.quote(cursor)
-                page_url = base_search_url + f"&cursor={encoded_cursor}"
-
-                page_results, _ = _fetch_search_page(page, page_url, page_idx)
-                if not page_results:
-                    logger.info("Seite %d lieferte keine Ergebnisse, übersprungen.", page_idx)
-                    continue
-
-                new_count = 0
-                for pl in parse_search_results(
-                    {"data": {"presentation": {"staysSearch": {"results": {"searchResults": page_results}}}}}
-                ):
-                    if pl.airbnb_id not in parsed_listings:
-                        parsed_listings[pl.airbnb_id] = pl
-                        new_count += 1
-                    else:
-                        parsed_listings[pl.airbnb_id] = pl  # neueste Daten behalten
-
-                logger.info(
-                    "Seite %d: %d Ergebnisse (%d neu gesamt=%d)",
-                    page_idx, len(page_results), new_count, len(parsed_listings),
-                )
-
-            # --- Entire-Home-Filter + District-Vorfilter ---
             filtered = [
                 pl for pl in parsed_listings.values()
-                if is_entire_home(pl)
-                and assign_district(pl.lat, pl.lng, relevant) != "unassigned"
+                if is_entire_home(pl) and _in_radius(pl)
             ]
             logger.info(
-                "Suchergebnisse: %d total (alle Seiten), %d nach Entire-Home- + District-Filter",
+                "Suchergebnisse: %d total (alle Boxen), %d nach Entire-Home- + Distanz-Filter",
                 len(parsed_listings),
                 len(filtered),
             )

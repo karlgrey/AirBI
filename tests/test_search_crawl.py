@@ -1,10 +1,9 @@
 from decimal import Decimal
 
 from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
-from airbi.geo.districts import load_districts
+from airbi.geo.distance import concentric_boxes
 from airbi.scraper.models import ListingDetail, ParsedListing
 from airbi.scraper.search_crawl import (
-    bounding_box_for,
     is_entire_home,
     merge_detail,
     persist_results,
@@ -21,12 +20,12 @@ def _parsed(airbnb_id, lat, lng, property_type="Apartment", review_count=10, tit
     )
 
 
-def test_bounding_box_covers_all_district_polygons():
-    districts = load_districts()
-    sw_lat, sw_lng, ne_lat, ne_lng = bounding_box_for(districts, margin=0.0)
-    assert sw_lat <= 38.7390 <= ne_lat
-    assert sw_lng <= -9.1044 <= ne_lng
-    assert ne_lat > sw_lat and ne_lng > sw_lng
+def test_concentric_boxes_center_inside_each_box():
+    boxes = concentric_boxes(38.7391, -9.1048, [1, 2, 3, 5, 10])
+    assert len(boxes) == 5
+    for sw_lat, sw_lng, ne_lat, ne_lng in boxes:
+        assert sw_lat < 38.7391 < ne_lat
+        assert sw_lng < -9.1048 < ne_lng
 
 
 def test_is_entire_home_accepts_apartments_rejects_rooms():
