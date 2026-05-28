@@ -1,0 +1,69 @@
+# AirBI — Deployment (Production)
+
+> Live: **https://airbi.remoterepublic.com**
+> Erste Ausrollung: 2026-05-28 (Spec: `docs/superpowers/specs/2026-05-28-deployment-vps-design.md`)
+
+## Host & Topologie
+
+| | |
+|---|---|
+| Host | `deploy@labs.remoterepublic.com` (Ubuntu 24.04, geteilt mit anderen Apps) |
+| Code | `/opt/airbi` (git-clone via Read-only-Deploy-Key, Branch `main`) |
+| Service | systemd-Unit `airbi-web` → uvicorn auf `127.0.0.1:8000` |
+| Reverse-Proxy | Caddy (`/etc/caddy/Caddyfile`, Block `airbi.remoterepublic.com`), Auto-TLS via Let's Encrypt |
+| Datenbank | PostgreSQL (lokal), Rolle + DB `airbi` |
+| Secret | `/opt/airbi/.env` (`DATABASE_URL`, `chmod 600`, deploy-owned, gitignored) |
+| Paket-Manager | `uv` (`~/.local/bin/uv`), venv unter `/opt/airbi/.venv` |
+
+## Komponenten im Detail
+
+- **systemd:** `/etc/systemd/system/airbi-web.service` — `Restart=always`, lädt `EnvironmentFile=/opt/airbi/.env`, `ExecStart=/home/deploy/.local/bin/uv run --no-dev airbi web --host 127.0.0.1 --port 8000`.
+- **Caddy-Block:** reverse_proxy → `localhost:8000`, Healthcheck auf `/health`, HSTS-/Security-Header. HTTP→HTTPS-Redirect automatisch.
+- **DB:** Schema via Alembic (`alembic upgrade head`). Daten initial per `pg_dump --data-only` vom Dev-Rechner eingespielt.
+
+## Update-Pfad (neue Version ausrollen)
+
+```bash
+ssh deploy@labs.remoterepublic.com
+cd /opt/airbi
+git pull --ff-only
+~/.local/bin/uv sync --no-dev
+~/.local/bin/uv run alembic upgrade head      # nur falls neue Migrationen
+sudo systemctl restart airbi-web
+curl -s localhost:8000/health                  # {"status":"ok"} erwarten
+```
+
+## Betrieb
+
+- **Status:** `systemctl status airbi-web`
+- **Logs:** `journalctl -u airbi-web -f`
+- **Caddy-Reload (nach Caddyfile-Änderung):** `sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`
+- **Caddyfile-Backups:** `/etc/caddy/Caddyfile.bak-airbi-<timestamp>`
+
+## Daten aktualisieren
+
+Der Crawl läuft **nicht** auf dem Server (braucht Residential-IP). Neue Daten kommen per Dump/Restore vom Dev-Rechner:
+
+```bash
+# lokal
+PGPASSWORD=airbi pg_dump --data-only --no-owner --no-privileges -h localhost -U airbi -d airbi \
+  -t search_config -t crawl_run -t listing -t snapshot -f /tmp/airbi-data.sql
+scp /tmp/airbi-data.sql deploy@labs.remoterepublic.com:/tmp/
+# auf dem Server (Prod-DB ggf. vorher leeren, je nach Strategie)
+ssh deploy@labs.remoterepublic.com 'cd /opt/airbi && set -a; . .env; set +a; \
+  PGPASSWORD=$(echo "$DATABASE_URL" | sed -E "s|.*://airbi:([^@]+)@.*|\1|") \
+  psql -h localhost -U airbi -d airbi -f /tmp/airbi-data.sql; rm -f /tmp/airbi-data.sql'
+```
+
+## Rollback
+
+- App stoppen: `sudo systemctl stop airbi-web` (andere Apps unberührt).
+- Caddy-Block zurück: Backup zurückspielen, `caddy validate`, `systemctl reload caddy`.
+- DB zurücksetzen: `sudo -u postgres dropdb airbi` + neu anlegen (betrifft keine andere App).
+
+## Bewusst (noch) NICHT auf dem Server
+
+- APScheduler-Auto-Crawl, Backup-Cron, Monitoring/Alerting.
+- Residential-Proxy + Crawl-Topologie (Crawl bleibt Dev-Rechner).
+- Playwright-Browser-Binaries (Server crawlt nicht).
+- CI/CD, Staging.
