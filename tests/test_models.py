@@ -60,6 +60,20 @@ def test_snapshot_links_listing_and_crawl_run(db_session):
     assert snap.listing.airbnb_id == "999"
 
 
+def test_search_config_center_and_band_fields(db_session):
+    cfg = SearchConfig(
+        name="Umkreis Cfg",
+        center_lat=38.7391, center_lng=-9.1048,
+        center_label="R. Cap. Leitão 86",
+    )
+    db_session.add(cfg)
+    db_session.flush()
+    assert cfg.center_lat == 38.7391
+    assert cfg.center_lng == -9.1048
+    assert cfg.center_label == "R. Cap. Leitão 86"
+    assert cfg.band_radii_km == [1, 2, 3, 5, 10]  # Default
+
+
 def test_listing_stores_amenity_score_and_amenities(db_session):
     from airbi.db.models import Listing
     listing = Listing(

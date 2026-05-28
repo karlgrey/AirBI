@@ -28,6 +28,12 @@ class SearchConfig(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     city_slug: Mapped[str] = mapped_column(String(80), default="lisboa")
     district_slugs: Mapped[list] = mapped_column(JSON, default=list)
+    center_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    center_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    center_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    band_radii_km: Mapped[list] = mapped_column(
+        JSON, default=lambda: [1, 2, 3, 5, 10]
+    )
     property_filter: Mapped[dict] = mapped_column(JSON, default=dict)
     classification_config: Mapped[dict] = mapped_column(JSON, default=dict)
     crawl_schedule: Mapped[str | None] = mapped_column(String(80), nullable=True)
