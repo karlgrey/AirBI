@@ -31,10 +31,11 @@ class ParsedListing:
 
 @dataclass
 class ListingDetail:
-    """Aus der Airbnb-Detailseite extrahierte Raumzahlen (minimaler
-    Detail-Crawl). Wird vom Orchestrator in ein ParsedListing gemergt."""
+    """Aus der Airbnb-Detailseite extrahierte Daten (Detail-Crawl)."""
 
     bedrooms: int | None
     beds: int | None
     bathrooms: float | None
     max_guests: int | None
+    amenities: list[str] | None = None
+    description: str | None = None

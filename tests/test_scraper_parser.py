@@ -170,3 +170,22 @@ def test_search_parser_extracts_price_from_discounted_line():
     target = next(pl for pl in listings if pl.airbnb_id == "17346774")
     assert target.price is not None
     assert target.price > 0
+
+
+def test_detail_parser_extracts_available_amenities():
+    detail = parse_listing_detail(_detail_payload())
+    assert detail.amenities is not None
+    assert any("river view" in a.lower() for a in detail.amenities)
+    assert any("air conditioning" in a.lower() for a in detail.amenities)
+    assert not any("smoke alarm" == a.lower() for a in detail.amenities)
+    assert 20 <= len(detail.amenities) <= 44
+
+
+def test_detail_parser_extracts_description():
+    detail = parse_listing_detail(_detail_payload())
+    assert detail.description is None or "<" not in detail.description
+
+
+def test_detail_parser_amenities_empty_on_unexpected_shape():
+    detail = parse_listing_detail({})
+    assert detail.amenities == [] or detail.amenities is None
