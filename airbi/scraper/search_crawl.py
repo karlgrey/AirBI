@@ -369,7 +369,7 @@ def run_search_crawl(
             for pl in filtered:
                 detail_url = f"https://www.airbnb.com/rooms/{pl.airbnb_id}"
                 try:
-                    page.goto(detail_url, timeout=60_000, wait_until="networkidle")
+                    page.goto(detail_url, timeout=30_000, wait_until="domcontentloaded")
                     page.wait_for_timeout(4_000)
                     blobs = page.eval_on_selector_all(
                         "script[id^='data-deferred-state']",
