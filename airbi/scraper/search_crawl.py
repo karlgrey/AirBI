@@ -170,18 +170,25 @@ def persist_results(
 _MAX_PAGES = 20  # Schutz gegen Endlosschleifen
 
 
+_REFRESH_BATCH_SIZE = 50  # Browser nach so vielen Listings frisch starten (Hang-Schutz)
+
+
 def refresh_details(
     session: "Session",
     search_config: "SearchConfig",
     *,
     headless: bool = True,
 ) -> int:
-    """Re-Crawl der Detail-Seiten ALLER Listings des letzten completed Runs.
+    """Re-Crawl der Detail-Seiten aller Listings des letzten completed Runs.
 
     Aktualisiert Stammdaten (bedrooms/beds/bathrooms/max_guests/amenities/
     description/size_class/amenity_score) — ohne neue Such-Phase und ohne
     neue Snapshots. Sinnvoll, wenn der Parser gefixt wurde und die existierenden
     Listings mit den korrigierten Feldern angereichert werden sollen.
+
+    **Resumierbar**: Listings mit ``bedrooms IS NOT NULL`` werden übersprungen.
+    Per-Listing-Commit, Browser-Neustart alle ``_REFRESH_BATCH_SIZE`` Listings.
+    Ein Hang verliert maximal ein Listing.
 
     Gibt die Anzahl tatsächlich aktualisierter Listings zurück.
     """
@@ -214,55 +221,73 @@ def refresh_details(
         .where(Snapshot.crawl_run_id == run.id)
     ).all()
     total = len(rows)
+    # Resume: nur Listings ohne bedrooms anfassen.
+    todo = [(l, s) for (l, s) in rows if l.bedrooms is None]
+    skipped = total - len(todo)
     cls_config = search_config.classification_config or {}
-    logger.info("Detail-Refresh beginnt: %d Listings aus Run %d", total, run.id)
+    logger.info(
+        "Detail-Refresh: %d Listings zu refreshen (skip %d bereits-refreshed) aus Run %d",
+        len(todo), skipped, run.id,
+    )
 
     updated = 0
-    with browser_context(headless=headless) as ctx:
-        page = ctx.new_page()
-        for i, (listing, snap) in enumerate(rows, start=1):
-            logger.info("Refresh %d/%d: airbnb_id=%s", i, total, listing.airbnb_id)
-            detail_url = f"https://www.airbnb.com/rooms/{listing.airbnb_id}"
-            try:
-                page.goto(detail_url, timeout=30_000, wait_until="domcontentloaded")
-                page.wait_for_timeout(4_000)
-                blobs = page.eval_on_selector_all(
-                    "script[id^='data-deferred-state']",
-                    "els => els.map(e => e.textContent)",
+    # In Batches; jeder Batch bekommt einen frischen Browser (mildert Long-Session-Hangs).
+    for batch_start in range(0, len(todo), _REFRESH_BATCH_SIZE):
+        batch = todo[batch_start : batch_start + _REFRESH_BATCH_SIZE]
+        logger.info(
+            "Browser-Batch %d–%d (von %d)",
+            batch_start + 1, batch_start + len(batch), len(todo),
+        )
+        with browser_context(headless=headless) as ctx:
+            page = ctx.new_page()
+            for j, (listing, snap) in enumerate(batch, start=1):
+                i_global = batch_start + j
+                logger.info(
+                    "Refresh %d/%d: airbnb_id=%s",
+                    i_global, len(todo), listing.airbnb_id,
                 )
-                if blobs:
-                    payload = json.loads(blobs[0])
-                    detail = parse_listing_detail(payload)
-                    # Felder nur überschreiben, wenn der Parser sie geliefert hat.
-                    if detail.bedrooms is not None:
-                        listing.bedrooms = detail.bedrooms
-                    if detail.beds is not None:
-                        listing.beds = detail.beds
-                    if detail.bathrooms is not None:
-                        listing.bathrooms = detail.bathrooms
-                    if detail.max_guests is not None:
-                        listing.max_guests = detail.max_guests
-                    if detail.amenities:
-                        listing.amenities = detail.amenities
-                    if detail.description:
-                        listing.description = detail.description
-                    listing.size_class = _size_class(listing.bedrooms)
-                    listing.amenity_score = _amenity_score(
-                        listing.amenities,
-                        beds=listing.beds,
-                        bedrooms=listing.bedrooms,
-                        max_guests=listing.max_guests,
-                        is_superhost=listing.is_superhost,
-                        rating=snap.rating,
-                        config=cls_config,
+                detail_url = f"https://www.airbnb.com/rooms/{listing.airbnb_id}"
+                try:
+                    page.goto(detail_url, timeout=30_000, wait_until="domcontentloaded")
+                    page.wait_for_timeout(4_000)
+                    blobs = page.eval_on_selector_all(
+                        "script[id^='data-deferred-state']",
+                        "els => els.map(e => e.textContent)",
                     )
-                    updated += 1
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Refresh für %s fehlgeschlagen: %s", listing.airbnb_id, exc)
-            human_delay(*DEFAULT_PAGE_DELAY)
+                    if blobs:
+                        payload = json.loads(blobs[0])
+                        detail = parse_listing_detail(payload)
+                        if detail.bedrooms is not None:
+                            listing.bedrooms = detail.bedrooms
+                        if detail.beds is not None:
+                            listing.beds = detail.beds
+                        if detail.bathrooms is not None:
+                            listing.bathrooms = detail.bathrooms
+                        if detail.max_guests is not None:
+                            listing.max_guests = detail.max_guests
+                        if detail.amenities:
+                            listing.amenities = detail.amenities
+                        if detail.description:
+                            listing.description = detail.description
+                        listing.size_class = _size_class(listing.bedrooms)
+                        listing.amenity_score = _amenity_score(
+                            listing.amenities,
+                            beds=listing.beds,
+                            bedrooms=listing.bedrooms,
+                            max_guests=listing.max_guests,
+                            is_superhost=listing.is_superhost,
+                            rating=snap.rating,
+                            config=cls_config,
+                        )
+                        session.commit()  # Per-Listing-Commit — Hang verliert max. 1 Listing.
+                        updated += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Refresh für %s fehlgeschlagen: %s", listing.airbnb_id, exc)
+                    session.rollback()
+                human_delay(*DEFAULT_PAGE_DELAY)
 
-    session.commit()
-    logger.info("Detail-Refresh fertig: %d/%d Listings aktualisiert", updated, total)
+    logger.info("Detail-Refresh fertig: %d/%d Listings aktualisiert (skip %d)",
+                updated, len(todo), skipped)
     return updated
 
 
