@@ -161,6 +161,35 @@ def test_detail_parser_tolerates_unexpected_shape():
     assert detail.max_guests is None
 
 
+def test_detail_parser_reads_pdp_overview_items_string_list():
+    """Aktuelles Airbnb-Schema (Stand 2026-06): ``pdpPresentation.overview.items``
+    ist eine flache Liste von Strings, kein Dict mehr. Der Parser muss diese
+    Quelle als primär nutzen — sonst bleibt ``bedrooms`` immer ``None``."""
+    payload = {
+        "niobeClientData": [
+            [
+                None,
+                {
+                    "data": {
+                        "node": {
+                            "pdpPresentation": {
+                                "overview": {
+                                    "items": ["4 guests", "1 bedroom", "2 beds", "1 bath"]
+                                }
+                            }
+                        }
+                    }
+                },
+            ]
+        ]
+    }
+    detail = parse_listing_detail(payload)
+    assert detail.bedrooms == 1
+    assert detail.beds == 2
+    assert detail.bathrooms == 1.0
+    assert detail.max_guests == 4
+
+
 def test_search_parser_extracts_price_from_discounted_line():
     """Listings mit primaryLine.__typename = DiscountedDisplayPriceLine
     haben weiterhin einen Preis (jetzt der Pro-Nacht-Preis aus explanationData,

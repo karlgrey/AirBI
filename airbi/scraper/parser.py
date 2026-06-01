@@ -175,9 +175,34 @@ def _parse_result(r: dict, position: int) -> ParsedListing | None:
 
 
 def _collect_overview_items(payload: dict) -> list[dict]:
-    """Durchsucht alle Sections in sbuiData nach overviewItems-Listen und
-    gibt eine flache Liste aller gefundenen Items zurück."""
+    """Durchsucht den Detail-Payload nach Zimmer-Overview-Items und gibt eine
+    flache Liste mit ``{"title": str, ...}``-Items zurück.
+
+    Aktuelle Airbnb-Struktur (Stand 2026-06): ``pdpPresentation.overview.items``
+    ist eine Liste von **Strings** (``["4 guests", "1 bedroom", "2 beds",
+    "1 bath"]``). Wir wrappen jeden String als ``{"title": s}``, damit die
+    Regex-Iteration in :func:`parse_listing_detail` unverändert weiterläuft.
+
+    Fallback für ältere/abweichende Strukturen: ``sbuiData.sectionConfiguration
+    .root.sections[*].sectionData.overviewItems`` (Liste von Dicts mit
+    ``title``-Schlüssel).
+    """
     items: list[dict] = []
+    # Primäre Quelle: pdpPresentation.overview.items (flache String-Liste).
+    try:
+        overview_strings = (
+            payload["niobeClientData"][0][1]["data"]
+            ["node"]["pdpPresentation"]["overview"]["items"]
+        )
+        if isinstance(overview_strings, list):
+            for entry in overview_strings:
+                if isinstance(entry, str):
+                    items.append({"title": entry})
+                elif isinstance(entry, dict) and isinstance(entry.get("title"), str):
+                    items.append(entry)
+    except (KeyError, IndexError, TypeError):
+        pass
+    # Fallback: alter sbuiData-Pfad.
     try:
         sc_sections = (
             payload["niobeClientData"][0][1]["data"]
