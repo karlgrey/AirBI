@@ -170,6 +170,102 @@ def persist_results(
 _MAX_PAGES = 20  # Schutz gegen Endlosschleifen
 
 
+def refresh_details(
+    session: "Session",
+    search_config: "SearchConfig",
+    *,
+    headless: bool = True,
+) -> int:
+    """Re-Crawl der Detail-Seiten ALLER Listings des letzten completed Runs.
+
+    Aktualisiert Stammdaten (bedrooms/beds/bathrooms/max_guests/amenities/
+    description/size_class/amenity_score) — ohne neue Such-Phase und ohne
+    neue Snapshots. Sinnvoll, wenn der Parser gefixt wurde und die existierenden
+    Listings mit den korrigierten Feldern angereichert werden sollen.
+
+    Gibt die Anzahl tatsächlich aktualisierter Listings zurück.
+    """
+    import json
+
+    from sqlalchemy import select
+
+    from airbi.db.models import CrawlRun, Listing, Snapshot
+    from airbi.scraper.browser import browser_context
+    from airbi.scraper.pacing import DEFAULT_PAGE_DELAY, human_delay
+    from airbi.scraper.parser import parse_listing_detail
+
+    # Letzten completed Run dieser Config finden.
+    stmt = (
+        select(CrawlRun)
+        .where(CrawlRun.search_config_id == search_config.id)
+        .where(CrawlRun.status == "completed")
+        .order_by(CrawlRun.started_at.desc(), CrawlRun.id.desc())
+        .limit(1)
+    )
+    run = session.execute(stmt).scalar_one_or_none()
+    if run is None:
+        logger.warning("Kein completed Run gefunden für Config '%s'", search_config.name)
+        return 0
+
+    # Listings + Snapshots dieses Runs laden (Snapshot.rating fließt in amenity_score).
+    rows = session.execute(
+        select(Listing, Snapshot)
+        .join(Snapshot, Snapshot.listing_id == Listing.id)
+        .where(Snapshot.crawl_run_id == run.id)
+    ).all()
+    total = len(rows)
+    cls_config = search_config.classification_config or {}
+    logger.info("Detail-Refresh beginnt: %d Listings aus Run %d", total, run.id)
+
+    updated = 0
+    with browser_context(headless=headless) as ctx:
+        page = ctx.new_page()
+        for i, (listing, snap) in enumerate(rows, start=1):
+            logger.info("Refresh %d/%d: airbnb_id=%s", i, total, listing.airbnb_id)
+            detail_url = f"https://www.airbnb.com/rooms/{listing.airbnb_id}"
+            try:
+                page.goto(detail_url, timeout=30_000, wait_until="domcontentloaded")
+                page.wait_for_timeout(4_000)
+                blobs = page.eval_on_selector_all(
+                    "script[id^='data-deferred-state']",
+                    "els => els.map(e => e.textContent)",
+                )
+                if blobs:
+                    payload = json.loads(blobs[0])
+                    detail = parse_listing_detail(payload)
+                    # Felder nur überschreiben, wenn der Parser sie geliefert hat.
+                    if detail.bedrooms is not None:
+                        listing.bedrooms = detail.bedrooms
+                    if detail.beds is not None:
+                        listing.beds = detail.beds
+                    if detail.bathrooms is not None:
+                        listing.bathrooms = detail.bathrooms
+                    if detail.max_guests is not None:
+                        listing.max_guests = detail.max_guests
+                    if detail.amenities:
+                        listing.amenities = detail.amenities
+                    if detail.description:
+                        listing.description = detail.description
+                    listing.size_class = _size_class(listing.bedrooms)
+                    listing.amenity_score = _amenity_score(
+                        listing.amenities,
+                        beds=listing.beds,
+                        bedrooms=listing.bedrooms,
+                        max_guests=listing.max_guests,
+                        is_superhost=listing.is_superhost,
+                        rating=snap.rating,
+                        config=cls_config,
+                    )
+                    updated += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Refresh für %s fehlgeschlagen: %s", listing.airbnb_id, exc)
+            human_delay(*DEFAULT_PAGE_DELAY)
+
+    session.commit()
+    logger.info("Detail-Refresh fertig: %d/%d Listings aktualisiert", updated, total)
+    return updated
+
+
 def run_search_crawl(
     session: "Session",
     search_config: "SearchConfig",

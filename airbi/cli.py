@@ -47,6 +47,37 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
         session.close()
 
 
+def _cmd_refresh_details(args: argparse.Namespace) -> int:
+    """Aktualisiert Detail-Daten ALLER Listings des letzten Runs einer SearchConfig."""
+    from airbi.db.models import SearchConfig
+    from airbi.db.session import SessionLocal
+    from airbi.scraper.search_crawl import refresh_details
+
+    if args.verbose:
+        import logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            stream=sys.stderr,
+            force=True,
+        )
+
+    session = SessionLocal()
+    try:
+        config = session.query(SearchConfig).filter_by(name=args.config).one_or_none()
+        if config is None:
+            print(
+                f"Fehler: SearchConfig '{args.config}' nicht gefunden.",
+                file=sys.stderr,
+            )
+            return 1
+        n = refresh_details(session, config, headless=not args.headful)
+        print(f"Refresh fertig: {n} Listings aktualisiert.")
+        return 0
+    finally:
+        session.close()
+
+
 def _cmd_web(args: argparse.Namespace) -> int:
     """Startet das FastAPI-Dashboard via uvicorn."""
     import uvicorn
@@ -93,6 +124,24 @@ def main(argv: list[str] | None = None) -> None:
         help="Info-Level-Logging auf stderr (Box-/Detail-Fortschritt mit Timestamps)",
     )
 
+    # --- refresh-details ---
+    refresh_parser = subparsers.add_parser(
+        "refresh-details",
+        help="Detail-Daten aller Listings des letzten Runs neu crawlen",
+        description=(
+            "Re-Crawl der Detail-Seiten aller Listings des letzten completed "
+            "Runs einer SearchConfig. Aktualisiert bedrooms/beds/bathrooms/"
+            "max_guests/amenities/description/size_class/amenity_score — keine "
+            "neue Such-Phase, keine neuen Snapshots."
+        ),
+    )
+    refresh_parser.add_argument("--config", required=True, metavar="NAME",
+                                help="Name der SearchConfig")
+    refresh_parser.add_argument("--headful", action="store_true", default=False,
+                                help="Browser sichtbar anzeigen (Standard: headless)")
+    refresh_parser.add_argument("--verbose", "-v", action="store_true", default=False,
+                                help="Info-Level-Logging auf stderr")
+
     # --- web ---
     web_parser = subparsers.add_parser(
         "web",
@@ -112,5 +161,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "crawl":
         sys.exit(_cmd_crawl(args))
+    if args.command == "refresh-details":
+        sys.exit(_cmd_refresh_details(args))
     if args.command == "web":
         sys.exit(_cmd_web(args))
