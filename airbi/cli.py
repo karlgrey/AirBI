@@ -17,6 +17,15 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
     from airbi.db.session import SessionLocal
     from airbi.scraper.search_crawl import run_search_crawl
 
+    if args.verbose:
+        import logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            stream=sys.stderr,
+            force=True,
+        )
+
     session = SessionLocal()
     try:
         config = (
@@ -76,6 +85,12 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         default=False,
         help="Browser sichtbar anzeigen (Standard: headless)",
+    )
+    crawl_parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        default=False,
+        help="Info-Level-Logging auf stderr (Box-/Detail-Fortschritt mit Timestamps)",
     )
 
     # --- web ---

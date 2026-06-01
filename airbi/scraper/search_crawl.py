@@ -366,7 +366,10 @@ def run_search_crawl(
 
             # --- Detail-Crawl ---
             final_listings: list[ParsedListing] = []
-            for pl in filtered:
+            total_filtered = len(filtered)
+            logger.info("Detail-Crawl beginnt: %d Listings", total_filtered)
+            for i, pl in enumerate(filtered, start=1):
+                logger.info("Detail %d/%d: airbnb_id=%s", i, total_filtered, pl.airbnb_id)
                 detail_url = f"https://www.airbnb.com/rooms/{pl.airbnb_id}"
                 try:
                     page.goto(detail_url, timeout=30_000, wait_until="domcontentloaded")
