@@ -343,6 +343,40 @@ def test_underserved_respects_max_count_and_marks_thin():
     assert matrix.underserved[1].is_thin is True
 
 
+def test_underserved_rationale_solid_cell_mentions_demand_signal_and_adr():
+    """Belastbare Cells erhalten 'solides Demand-Signal' + ADR im Satz."""
+    rows = (
+        [_row(f"o{i}", "1BR", 100, 30) for i in range(3)]
+        + [_row(f"s{i}", "Studio", 100, 50) for i in range(3)]
+    )
+    matrix = build_segment_matrix(
+        rows, config={"min_sample": 1, "underserved_max": 2},
+        radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    # 1BR-Budget (Score 30) ist eine belastbare Chancen-Cell.
+    target = next(u for u in matrix.underserved if (u.size_class, u.luxury_class) == ("1BR", "Budget"))
+    assert target.is_thin is False
+    assert "solides Demand-Signal" in target.rationale
+    assert "€100" in target.rationale       # Median-ADR
+    assert "Wettbewerber" in target.rationale
+
+
+def test_underserved_rationale_thin_cell_warns_about_sample_size():
+    """Dünne Cells bekommen einen Vorbehalts-Satz."""
+    # 3x 1BR-Budget (nicht thin) + 1x 2BR-Mid (thin, hoher Score)
+    rows = (
+        [_row(f"a{i}", "1BR", 50, 30) for i in range(3)]
+        + [_row("b", "2BR", 250, 90)]
+    )
+    matrix = build_segment_matrix(
+        rows, config={"min_sample": 3, "underserved_max": 3},
+        radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    thin = next(u for u in matrix.underserved if u.is_thin)
+    assert "stark unterversorgt" in thin.rationale
+    assert "Stichprobe zu klein" in thin.rationale
+
+
 def test_underserved_is_empty_when_no_cell_has_score():
     """Ohne Listings sind alle Cells leer → keine Chancen-Segmente."""
     matrix = build_segment_matrix(

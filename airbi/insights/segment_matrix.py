@@ -93,6 +93,7 @@ class UnderservedSegment:
     adr: "Decimal | None"
     score: float
     is_thin: bool
+    rationale: str = ""           # Kurze Prosa-Begründung (1-2 Sätze).
 
 
 @dataclass
@@ -220,6 +221,27 @@ def _compute_top_performer_profile(
     )
 
 
+def _underserved_rationale(n: int, score: float, adr, is_thin: bool) -> str:
+    """Kurze Prosa-Begründung pro Chancen-Segment: Demand-Signal in Worten.
+
+    Zwei Varianten — eine für belastbare, eine für thin Cells. Bezieht den
+    Median-ADR ein, sofern vorhanden.
+    """
+    score_int = int(round(score))
+    n_label = f"{n} Wettbewerber" if n != 1 else "1 Wettbewerber"
+    adr_part = f", Median €{int(adr)}/Nacht" if adr is not None else ""
+    if is_thin:
+        return (
+            f"Nur {n_label}, aber im Schnitt {score_int} Bewertungen je "
+            f"Apartment — sieht stark unterversorgt aus{adr_part}. Stichprobe "
+            f"zu klein für eine belastbare Aussage."
+        )
+    return (
+        f"{n_label}, je Ø {score_int} Bewertungen — solides Demand-Signal"
+        f"{adr_part}."
+    )
+
+
 def _rank_underserved_segments(
     cells: dict,
     best_cell: tuple | None,
@@ -245,6 +267,7 @@ def _rank_underserved_segments(
             adr=cell.adr,
             score=cell.score,
             is_thin=cell.is_thin,
+            rationale=_underserved_rationale(cell.n, cell.score, cell.adr, cell.is_thin),
         )
         for key, cell in eligible[:max_count]
     ]

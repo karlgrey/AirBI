@@ -345,12 +345,15 @@ def test_dashboard_has_no_onboarding_box(client, db_session):
 
 def test_underserved_section_renders_with_other_chance_cells(client, db_session):
     """Unterversorgungs-Sicht: 'Andere Chancen-Segmente' rendert mit
-    Mini-Cards, sobald es Cells außer der Best-Cell mit Score gibt."""
+    Mini-Cards (inkl. Prosa-Begründung) sobald es Cells außer der Best-Cell
+    mit Score gibt."""
     cfg = _seed_winner_config(db_session)  # 2 1BR-Listings (Budget + Mid)
     body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
     assert "Andere Chancen-Segmente" in body
     # Mini-Card-Untertitel-Marker (Bew./Apt im KPI-Strip der Cards)
     assert "Bew./Apt" in body
+    # Prosa-Begründung pro Card (eines der zwei Wordings muss da sein)
+    assert "Demand-Signal" in body or "unterversorgt" in body
 
 
 def test_underserved_section_absent_when_no_other_cells(client, db_session):

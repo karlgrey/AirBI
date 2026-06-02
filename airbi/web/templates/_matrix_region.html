@@ -153,6 +153,11 @@
                     <div class="text-[9px] uppercase tracking-wide text-slate-400">Bew./Apt</div>
                   </div>
                 </div>
+                {% if seg.rationale %}
+                  <p class="mt-2 pt-2 border-t border-slate-100 text-[11px] leading-snug text-slate-600">
+                    {{ seg.rationale }}
+                  </p>
+                {% endif %}
               </div>
             {% endfor %}
           </div>
