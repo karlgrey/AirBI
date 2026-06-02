@@ -193,20 +193,38 @@ def test_recommendation_falls_back_when_no_cell_meets_min_sample():
     assert "zu dünn" in matrix.recommendation
 
 
-def test_top_performers_grouped_by_size_class_sorted_by_review_count():
+def test_top_performers_picks_top_n_from_best_cell_sorted_by_reviews():
+    """Top-Apartments sind die Top-N aus dem empfohlenen Segment (Best-Cell),
+    sortiert nach review_count desc. Listings ANDERER Cells erscheinen nicht
+    — sie sind konkrete Beispiele für die Hero-Empfehlung."""
     rows = [
         _row("a", "1BR", 100, 5,  rating=4.5),
-        _row("b", "1BR", 100, 90, rating=4.9),  # Top 1
-        _row("c", "1BR", 100, 50, rating=4.7),  # Top 2
-        _row("d", "2BR", 100, 30, rating=4.6),  # einziger 2BR
+        _row("b", "1BR", 100, 90, rating=4.9),
+        _row("c", "1BR", 100, 50, rating=4.7),
+        _row("d", "2BR", 100, 30, rating=4.6),     # andere Cell -- soll WEG sein
     ]
-    matrix = _build(rows, config={"top_performers_per_segment": 2, "min_sample": 1})
+    matrix = _build(rows, config={"top_performers_count": 3, "min_sample": 1})
+    # Best-Cell: höchster Score → 1BR-Budget (3 Listings, score 48.3)
+    # vor 2BR-Budget (1 Listing, score 30).
+    assert matrix.best_cell == ("1BR", "Budget")
     perfs = matrix.top_performers
-    one_br = [p for p in perfs if p.size_class == "1BR"]
-    assert [p.airbnb_id for p in one_br] == ["b", "c"]
-    two_br = [p for p in perfs if p.size_class == "2BR"]
-    assert [p.airbnb_id for p in two_br] == ["d"]
-    assert [p.size_class for p in perfs] == ["1BR", "1BR", "2BR"]
+    assert [p.airbnb_id for p in perfs] == ["b", "c", "a"]
+    assert all(p.size_class == "1BR" for p in perfs)
+    assert all(p.luxury_class == "Budget" for p in perfs)
+
+
+def test_top_performers_fall_back_to_radius_top_when_no_best_cell():
+    """Ohne Best-Cell (thin data): Top-N im gesamten Umkreis cross-size,
+    sortiert nach Bewertungen."""
+    rows = [
+        _row("a", "1BR", 100, 30),
+        _row("b", "2BR", 100, 90),
+        _row("c", "Studio", 100, 50),
+    ]
+    matrix = _build(rows, config={"top_performers_count": 5, "min_sample": 10})
+    assert matrix.best_cell is None
+    perfs = matrix.top_performers
+    assert [p.airbnb_id for p in perfs] == ["b", "c", "a"]
 
 
 def test_top_performers_ignore_unclassified_size_class():
@@ -214,7 +232,7 @@ def test_top_performers_ignore_unclassified_size_class():
         _row("a", "unclassified", 100, 999),
         _row("b", "1BR", 100, 5),
     ]
-    matrix = _build(rows, config={"min_sample": 1, "top_performers_per_segment": 2})
+    matrix = _build(rows, config={"min_sample": 1, "top_performers_count": 5})
     assert all(p.size_class in SIZE_CLASSES for p in matrix.top_performers)
     assert any(p.airbnb_id == "b" for p in matrix.top_performers)
     assert all(p.airbnb_id != "a" for p in matrix.top_performers)
@@ -271,7 +289,7 @@ def test_top_performer_profile_caps_common_amenities_at_max():
     ]
     matrix = build_segment_matrix(
         rows,
-        config={"min_sample": 1, "top_performers_per_segment": 3,
+        config={"min_sample": 1, "top_performers_count": 3,
                 "amenity_share_threshold": 0.5, "common_amenities_max": 3},
         radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
     )

@@ -212,11 +212,13 @@ def test_top_apartments_section_renamed(client, db_session):
 
 
 def test_top_apartments_has_sort_explanation(client, db_session):
+    """Untertitel erklärt, was die Liste zeigt + nach was sortiert wird.
+    _seed_marvila liefert thin data -> der 'populärsten im Umkreis'-Variant."""
     _seed_marvila(db_session)
     response = client.get("/")
     body = response.text
-    assert "Sortiert nach Bewertungen" in body
-    assert "Buchungs-Indikator" in body
+    assert "sortiert nach Bewertungen" in body
+    assert "im Umkreis" in body
 
 
 def test_top_apartments_use_compact_size_tags(client, db_session):

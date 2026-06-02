@@ -29,7 +29,7 @@ SIZE_CLASSES: list[str] = ["Studio", "1BR", "2BR", "3BR+"]
 DEFAULT_INSIGHT_CONFIG: dict = {
     "min_sample": 3,        # Zellen mit weniger Listings gelten als "zu dünn".
     "review_rate": 0.40,    # Anteil bewertender Gäste (Briefing §3, ~30-50 %).
-    "top_performers_per_segment": 2,
+    "top_performers_count": 5,   # Anzahl Top-Apartments im empfohlenen Segment.
     "amenity_share_threshold": 0.5,   # Anteil-Schwelle für "common amenities".
     "common_amenities_max": 6,         # Max Items in TopPerformerProfile.common_amenities.
     "underserved_max": 3,              # Max Einträge in der Unterversorgungs-Sicht.
@@ -303,32 +303,41 @@ def _rank_underserved_segments(
 
 def _pick_top_performers(
     rows_by_cell: dict[tuple[str, str], list[ListingRow]],
-    per_segment: int,
+    best_cell: tuple[str, str] | None,
+    count: int,
 ) -> list[TopPerformer]:
-    """Top-N je Größenklasse, sortiert nach review_count desc, dann rating desc."""
-    by_size: dict[str, list[tuple[ListingRow, str]]] = {s: [] for s in SIZE_CLASSES}
-    for (size, lux), group in rows_by_cell.items():
-        for r in group:
-            by_size[size].append((r, lux))
+    """Top-N Apartments **aus dem empfohlenen Segment** (Best-Cell), sortiert
+    nach review_count desc, dann rating desc — als konkrete Beispiele für die
+    Hero-Empfehlung.
 
+    Fällt zurück auf die Top-N im aktiven Umkreis insgesamt (cross-size), wenn
+    keine Best-Cell existiert (thin data).
+    """
+    candidates: list[tuple[ListingRow, str]] = []
+    if best_cell is not None:
+        for r in rows_by_cell.get(best_cell, []):
+            candidates.append((r, best_cell[1]))
+    else:
+        for (_, lux), group in rows_by_cell.items():
+            for r in group:
+                candidates.append((r, lux))
+
+    candidates.sort(
+        key=lambda rt: (-rt[0].review_count, -(rt[0].rating or 0.0), rt[0].airbnb_id)
+    )
     result: list[TopPerformer] = []
-    for size in SIZE_CLASSES:
-        candidates = by_size[size]
-        candidates.sort(
-            key=lambda rt: (-rt[0].review_count, -(rt[0].rating or 0.0), rt[0].airbnb_id)
-        )
-        for r, lux in candidates[:per_segment]:
-            result.append(
-                TopPerformer(
-                    airbnb_id=r.airbnb_id,
-                    title=r.title,
-                    url=r.url,
-                    size_class=size,
-                    luxury_class=lux,
-                    review_count=r.review_count,
-                    rating=r.rating,
-                )
+    for r, lux in candidates[:count]:
+        result.append(
+            TopPerformer(
+                airbnb_id=r.airbnb_id,
+                title=r.title,
+                url=r.url,
+                size_class=r.size_class,
+                luxury_class=lux,
+                review_count=r.review_count,
+                rating=r.rating,
             )
+        )
     return result
 
 
@@ -410,7 +419,7 @@ def build_segment_matrix(
     )
     matrix.recommendation = _build_recommendation(matrix)
     matrix.top_performers = _pick_top_performers(
-        cell_rows, int(cfg["top_performers_per_segment"])
+        cell_rows, matrix.best_cell, int(cfg.get("top_performers_count", 5))
     )
     # Profil aggregiert über die Listings IM EMPFOHLENEN SEGMENT (Best-Cell) —
     # damit das Profil konsistent zur Hero-Empfehlung ist. Cross-size Top-N

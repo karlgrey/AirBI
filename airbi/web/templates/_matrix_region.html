@@ -258,7 +258,11 @@
       <section>
         <h3 class="text-sm font-semibold text-slate-900">Top-Apartments</h3>
         <p class="mt-0.5 text-[11px] italic text-slate-400">
-          Sortiert nach Bewertungen — dem stärksten verfügbaren Buchungs-Indikator
+          {% if has_best %}
+            Konkrete Beispiele im empfohlenen Segment ({% if bsize == "Studio" %}Studio{% elif bsize == "1BR" %}1 SZ{% elif bsize == "2BR" %}2 SZ{% elif bsize == "3BR+" %}3+ SZ{% else %}{{ bsize }}{% endif %} · {{ blux }}), sortiert nach Bewertungen.
+          {% else %}
+            Die populärsten Listings im Umkreis, sortiert nach Bewertungen.
+          {% endif %}
         </p>
         {% if matrix.top_performers %}
           <ul class="mt-2 divide-y divide-slate-100 border-t border-slate-100">
