@@ -130,6 +130,17 @@ def test_dashboard_has_radius_buttons(client, db_session):
     assert "1 km" in body and "2 km" in body and "10 km" in body
 
 
+def test_dashboard_ships_radius_button_click_highlighter(client, db_session):
+    """Nach Klick swappt HTMX nur die Matrix; ohne Client-Skript bliebe der
+    aktive Button auf dem initialen SSR-Stand. Stelle sicher, dass das Skript
+    + die Marker (umkreis-nav id, umkreis-btn class) ausgeliefert werden."""
+    _seed_marvila(db_session)
+    body = client.get("/").text
+    assert 'id="umkreis-nav"' in body
+    assert "umkreis-btn" in body
+    assert "addEventListener('click'" in body
+
+
 def test_dashboard_footer_shows_datenstand(client, db_session):
     _seed_marvila(db_session)
     response = client.get("/")

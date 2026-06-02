@@ -40,13 +40,13 @@
       </p>
     </section>
 
-    <nav class="mb-6 flex gap-2" aria-label="Umkreis">
+    <nav id="umkreis-nav" class="mb-6 flex gap-2" aria-label="Umkreis">
       {% for r in search_config.band_radii_km %}
         <button type="button"
                 hx-get="/matrix?config_id={{ search_config.id }}&radius_km={{ r }}"
                 hx-target="#matrix-region"
                 hx-swap="innerHTML"
-                class="rounded-md border px-3 py-1.5 text-sm
+                class="umkreis-btn rounded-md border px-3 py-1.5 text-sm
                        {% if active_radius == r %}
                          border-slate-900 bg-slate-900 text-white
                        {% else %}
@@ -56,6 +56,24 @@
         </button>
       {% endfor %}
     </nav>
+    <script>
+      (function () {
+        var nav = document.getElementById('umkreis-nav');
+        if (!nav) return;
+        var ACTIVE = ['border-slate-900', 'bg-slate-900', 'text-white'];
+        var INACTIVE = ['border-slate-300', 'bg-white', 'text-slate-700', 'hover:bg-slate-100'];
+        nav.addEventListener('click', function (ev) {
+          var btn = ev.target.closest('.umkreis-btn');
+          if (!btn || !nav.contains(btn)) return;
+          nav.querySelectorAll('.umkreis-btn').forEach(function (b) {
+            b.classList.remove.apply(b.classList, ACTIVE);
+            b.classList.add.apply(b.classList, INACTIVE);
+          });
+          btn.classList.remove.apply(btn.classList, INACTIVE);
+          btn.classList.add.apply(btn.classList, ACTIVE);
+        });
+      })();
+    </script>
 
     <section id="matrix-region">
       {% include "_matrix_region.html" %}
