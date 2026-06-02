@@ -74,8 +74,8 @@ def test_dashboard_renders_matrix_and_panel(client, db_session):
     assert "Datenstand" in body
     # Mindestens ein Listing-Titel taucht in den Top-Performern auf.
     assert "Marvila Loft" in body
-    # Proxy-Kennzeichnung sichtbar.
-    assert "geschätzte Nachfrage" in body
+    # Proxy-Kennzeichnung in der Marktübersichts-Caption.
+    assert "Nachfrage je Apartment" in body
 
 
 def test_matrix_partial_returns_umkreis_matrix(client, db_session):
@@ -414,6 +414,9 @@ def test_dashboard_has_no_old_empfehlungs_block(client, db_session):
 
 
 def test_matrix_axis_is_luxusklasse(client, db_session):
+    """Matrix-Achse heißt 'Luxusklasse'. Die Methodik (Preis + Amenities)
+    wandert in den Investment-Brief — der Begriff 'Luxusklasse' bleibt im
+    Matrix-Header sichtbar."""
     _seed_marvila(db_session)
     response = client.get("/")
     body = response.text

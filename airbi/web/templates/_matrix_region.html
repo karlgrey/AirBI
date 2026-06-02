@@ -193,12 +193,11 @@
 
       {# ============ MARKTÜBERSICHT (sekundär) ============ #}
       <section class="mb-6">
-        <header class="flex items-baseline justify-between mb-2">
+        <header class="mb-1">
           <h3 class="text-sm font-semibold text-slate-900">Marktübersicht · Umkreis {{ radius_int }} km</h3>
-          <span class="rounded bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500"
-                title="Mehr Bewertungen ≈ mehr Buchungen über die Lebenszeit (Annahme: ~{{ rate_pct }}% der Gäste bewerten).">
-            geschätzte Nachfrage ⓘ
-          </span>
+          <p class="text-[11px] text-slate-500 mt-0.5">
+            Heatmap-Färbung = Nachfrage je Apartment (dunkler = häufiger gebucht, ~{{ rate_pct }} % der Gäste bewerten). Goldumrandet: Empfehlung. Details je Zelle per Hover.
+          </p>
         </header>
         <div class="overflow-x-auto">
           <table class="w-full border-separate border-spacing-1 text-xs">
@@ -231,19 +230,15 @@
                                {% elif cell.heat == 1 %}bg-emerald-100
                                {% else %}bg-slate-100 text-slate-400{% endif %}
                                {% if matrix.best_cell == (size, tier) %}ring-2 ring-amber-500{% endif %}"
-                        title="{{ size }} · {{ tier }} — Durchschnittliche Bewertungen je Apartment, Anzahl Wettbewerber und Mittel-Preis pro Nacht. Die Luxusklasse kombiniert Preis und Ausstattung.">
+                        title="{% if cell.n == 0 %}{{ size }} · {{ tier }}: keine Apartments in diesem Segment.{% else %}{{ size }} · {{ tier }} · {{ cell.n }} Apartment{% if cell.n != 1 %}s{% endif %} · €{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}/Nacht · Ø {{ cell.score|round(0)|int }} Bewertungen je Apartment{% if cell.is_thin %} (Stichprobe klein — unter min. Vergleichs-Schwelle){% endif %}.{% endif %}">
                       {% if cell.n == 0 %}
                         <span class="text-[11px]">—</span>
                       {% else %}
-                        <div class="text-[11px]">
-                          {% if cell.is_thin %}
-                            <span class="rounded bg-white/60 px-1 text-[9px] uppercase text-slate-500">Stichprobe klein</span>
-                          {% endif %}
-                          <span class="font-semibold">{{ cell.score|round(0)|int }} Bew./Apt</span>
-                        </div>
-                        <div class="text-[10px] opacity-80">
-                          {{ cell.n }} Wettb. · €{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}/N.
-                        </div>
+                        <div class="text-[12px] font-semibold">{{ cell.n }} Apt.</div>
+                        <div class="text-[10px] opacity-80">€{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}/N.</div>
+                        {% if cell.is_thin %}
+                          <div class="text-[9px] uppercase tracking-wide text-slate-500 mt-0.5">klein</div>
+                        {% endif %}
                       {% endif %}
                     </td>
                   {% endfor %}
