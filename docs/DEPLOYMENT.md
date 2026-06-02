@@ -52,7 +52,16 @@ UPDATE search_config SET center_lat=38.7391, center_lng=-9.1048,
 WHERE name='Marvila Slice 1';
 ```
 
-Der Crawl läuft **nicht** auf dem Server (braucht Residential-IP). Neue Daten kommen per Dump/Restore vom Dev-Rechner:
+Der Crawl läuft **nicht** auf dem Server (braucht Residential-IP). Neue Daten kommen per Dump/Restore vom Dev-Rechner.
+
+**Befehle auf dem Dev-Rechner:**
+
+- `uv run airbi crawl --config "Marvila Slice 1" --verbose` — voller Lauf (5 konzentrische Boxen + Detail-Crawl). Single-Commit am Ende: ein Hang verliert alles. Mit `PYTHONUNBUFFERED=1 caffeinate -d -i -s --` umgeben und Deckel offen lassen.
+- `uv run airbi refresh-details --config "Marvila Slice 1" --verbose` — **resilient**: re-crawlt nur die Detail-Seiten aller Listings des letzten completed Runs. Per-Listing-Commit, resumierbar (skipped Listings mit `bedrooms IS NOT NULL`), Browser-Neustart alle 50. Sinnvoll nach einer Parser-Änderung, ohne neue Such-Phase.
+
+**Dump/Restore-Pfad:**
+
+
 
 ```bash
 # lokal
