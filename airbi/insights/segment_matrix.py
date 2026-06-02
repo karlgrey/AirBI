@@ -83,6 +83,32 @@ class TopPerformer:
 
 
 @dataclass
+class MapListing:
+    """Pro-Listing-Datenstruktur für die räumliche Sicht (Karte).
+    Enthält alle Felder, die Marker-Tooltip + Detail-Panel füllen."""
+
+    airbnb_id: str
+    lat: float
+    lng: float
+    title: str | None
+    url: str | None
+    size_class: str
+    luxury_class: str
+    price: "Decimal | None"
+    reviews: int
+    rating: float | None
+    bedrooms: int | None
+    beds: int | None
+    max_guests: int | None
+    is_superhost: bool
+    amenities: list           # auf max. 10 gekappt
+    description: str | None   # auf 300 Zeichen gekappt
+    distance_km: float
+    amenity_score: float | None
+    is_best: bool
+
+
+@dataclass
 class UnderservedSegment:
     """Eine 'Chancen-Zelle' aus der Matrix: hohe Nachfrage je Wettbewerber
     (Brief §8.2). Wird in der Ranking-Liste unter dem Brief gezeigt."""
@@ -128,6 +154,8 @@ class SegmentMatrix:
     top_performers: list[TopPerformer] = field(default_factory=list)
     top_performer_profile: TopPerformerProfile | None = None
     underserved: list[UnderservedSegment] = field(default_factory=list)
+    map_listings: list[MapListing] = field(default_factory=list)
+    map_data: dict = field(default_factory=dict)   # JSON-fertig fürs Template
     listing_count: int = 0
     review_rate: float = DEFAULT_INSIGHT_CONFIG["review_rate"]
     min_sample: int = DEFAULT_INSIGHT_CONFIG["min_sample"]
@@ -417,11 +445,13 @@ def compute_segment_matrix(
     crawl_run: CrawlRun,
 ) -> SegmentMatrix:
     """Lädt alle Listings+Snapshots des Runs und filtert per Distanz zum
-    Zielobjekt auf den gewählten Umkreis, dann ruft den reinen Builder."""
+    Zielobjekt:
+    - **Builder-Input**: Listings ≤ ``radius_km`` (Aktiv-Radius).
+    - **Map-Pool**: Listings ≤ ``max(band_radii_km)`` (alle 10 km für die
+      räumliche Sicht), `luxury_class` gegen die Aktiv-Radius-Kohorte.
+    """
     # SessionLocal nutzt autoflush=False — Pending Writes der gleichen
-    # Unit-of-Work müssen vor dem SELECT explizit sichtbar gemacht werden,
-    # damit Tests/Routen, die direkt vor der Insight schreiben, das Ergebnis
-    # auch lesen können.
+    # Unit-of-Work müssen vor dem SELECT explizit sichtbar gemacht werden.
     session.flush()
     stmt = (
         select(Listing, Snapshot)
@@ -431,34 +461,116 @@ def compute_segment_matrix(
     )
     center_lat = search_config.center_lat
     center_lng = search_config.center_lng
-    rows: list[ListingRow] = []
+    radii = search_config.band_radii_km or [radius_km]
+    max_radius = max(radii)
+
+    rows: list[ListingRow] = []                              # Aktiv-Radius (Builder)
+    map_pool: list[tuple[Listing, Snapshot, float]] = []     # Max-Radius (Map)
+
     if center_lat is not None and center_lng is not None:
         for listing, snap in session.execute(stmt).all():
             if listing.lat is None or listing.lng is None:
                 continue
-            if haversine_km(center_lat, center_lng, listing.lat, listing.lng) > radius_km:
+            dist = haversine_km(center_lat, center_lng, listing.lat, listing.lng)
+            if dist > max_radius:
                 continue
-            rows.append(
-                ListingRow(
-                    airbnb_id=listing.airbnb_id,
-                    title=listing.title,
-                    url=listing.url,
-                    size_class=listing.size_class or "unclassified",
-                    price=snap.price,
-                    review_count=snap.review_count or 0,
-                    rating=snap.rating,
-                    amenity_score=listing.amenity_score or 0.0,
-                    amenities=listing.amenities or [],
-                    bedrooms=listing.bedrooms,
-                    beds=listing.beds,
-                    max_guests=listing.max_guests,
-                    is_superhost=bool(listing.is_superhost),
+            map_pool.append((listing, snap, dist))
+            if dist <= radius_km:
+                rows.append(
+                    ListingRow(
+                        airbnb_id=listing.airbnb_id,
+                        title=listing.title,
+                        url=listing.url,
+                        size_class=listing.size_class or "unclassified",
+                        price=snap.price,
+                        review_count=snap.review_count or 0,
+                        rating=snap.rating,
+                        amenity_score=listing.amenity_score or 0.0,
+                        amenities=listing.amenities or [],
+                        bedrooms=listing.bedrooms,
+                        beds=listing.beds,
+                        max_guests=listing.max_guests,
+                        is_superhost=bool(listing.is_superhost),
+                    )
                 )
-            )
-    return build_segment_matrix(
+
+    matrix = build_segment_matrix(
         rows,
         config=search_config.classification_config or {},
         radius_km=radius_km,
         center_label=search_config.center_label,
         crawl_run_id=crawl_run.id,
     )
+
+    # Map-Listings nachträglich aus dem Max-Radius-Pool bauen — luxury_class
+    # gegen die Aktiv-Radius-Kohorte, is_best nur für Mitglieder im aktiven Radius.
+    cohort_prices = [r.price for r in rows if r.price is not None]
+    cls_config = search_config.classification_config or {}
+    map_listings: list[MapListing] = []
+    for listing, snap, dist in map_pool:
+        pct = _price_percentile(snap.price, cohort_prices) if snap.price is not None else None
+        lux = _luxury_class(pct, listing.amenity_score, cls_config) if pct is not None else "unclassified"
+        size = listing.size_class or "unclassified"
+        is_best = (
+            matrix.best_cell is not None
+            and (size, lux) == matrix.best_cell
+            and dist <= radius_km
+        )
+        desc = (listing.description or "")[:300] or None
+        map_listings.append(MapListing(
+            airbnb_id=listing.airbnb_id,
+            lat=listing.lat,
+            lng=listing.lng,
+            title=listing.title,
+            url=listing.url,
+            size_class=size,
+            luxury_class=lux,
+            price=snap.price,
+            reviews=snap.review_count or 0,
+            rating=snap.rating,
+            bedrooms=listing.bedrooms,
+            beds=listing.beds,
+            max_guests=listing.max_guests,
+            is_superhost=bool(listing.is_superhost),
+            amenities=(listing.amenities or [])[:10],
+            description=desc,
+            distance_km=round(dist, 2),
+            amenity_score=round(listing.amenity_score, 2) if listing.amenity_score is not None else None,
+            is_best=is_best,
+        ))
+    matrix.map_listings = map_listings
+    # JSON-fertige Repräsentation für das Template (Decimal -> float, etc.).
+    matrix.map_data = {
+        "center": {
+            "lat": float(center_lat) if center_lat is not None else None,
+            "lng": float(center_lng) if center_lng is not None else None,
+            "label": search_config.center_label or "Zielobjekt",
+        },
+        "radii_km": list(radii),
+        "active_radius_km": float(radius_km),
+        "listings": [
+            {
+                "id": m.airbnb_id,
+                "lat": m.lat,
+                "lng": m.lng,
+                "title": m.title,
+                "url": m.url,
+                "size_class": m.size_class,
+                "luxury_class": m.luxury_class,
+                "price": float(m.price) if m.price is not None else None,
+                "reviews": m.reviews,
+                "rating": m.rating,
+                "bedrooms": m.bedrooms,
+                "beds": m.beds,
+                "max_guests": m.max_guests,
+                "is_superhost": m.is_superhost,
+                "amenities": m.amenities,
+                "description": m.description,
+                "distance_km": m.distance_km,
+                "amenity_score": m.amenity_score,
+                "is_best": m.is_best,
+            }
+            for m in map_listings
+        ],
+    }
+    return matrix

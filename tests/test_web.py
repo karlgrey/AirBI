@@ -343,6 +343,21 @@ def test_dashboard_has_no_onboarding_box(client, db_session):
     assert "So liest du dieses Dashboard" not in body
 
 
+def test_map_section_renders_with_listings_and_data(client, db_session):
+    """Karten-Section: <div id='airbi-map'>, Detail-Panel und JSON-Daten-Block
+    sind im HTML; Leaflet kommt aus base.html."""
+    cfg = _seed_winner_config(db_session)
+    body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
+    assert 'id="airbi-map"' in body
+    assert 'id="map-detail"' in body
+    assert 'id="airbi-map-data"' in body
+    # Leaflet wird im base.html geladen
+    assert "leaflet.css" in body
+    assert "leaflet.js" in body
+    # Der Daten-Block enthält den Center-Label
+    assert "R. Cap. Le" in body  # in der JSON-Datenstruktur
+
+
 def test_underserved_section_renders_with_other_chance_cells(client, db_session):
     """Unterversorgungs-Sicht: 'Andere Chancen-Segmente' rendert mit
     Mini-Cards (inkl. Prosa-Begründung) sobald es Cells außer der Best-Cell

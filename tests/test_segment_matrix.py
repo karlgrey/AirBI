@@ -6,6 +6,7 @@ from airbi.insights.segment_matrix import (
     SIZE_CLASSES,
     Cell,
     ListingRow,
+    MapListing,
     SegmentMatrix,
     TopPerformer,
     TopPerformerProfile,
@@ -507,6 +508,75 @@ def test_compute_segment_matrix_populates_listing_row_detail_fields(db_session):
     # Wifi auf beiden → 100%
     assert dict(profile.common_amenities).get("Wifi") == 1.0
     assert profile.median_bedrooms == 1
+
+
+def test_compute_segment_matrix_populates_map_listings_with_max_radius_pool(db_session):
+    """map_listings enthält alle Listings im max(band_radii_km)-Umkreis, auch
+    außerhalb des aktiven Radius. is_best wird nur für Listings innerhalb des
+    Aktiv-Radius gesetzt (Best-Cell-Match)."""
+    from airbi.db.models import SearchConfig
+    cfg = SearchConfig(
+        name="MapCfg",
+        center_lat=38.7382, center_lng=-9.1055, center_label="R. Cap. Leitão 86",
+        band_radii_km=[1, 2, 10],
+        classification_config={"min_sample": 1},
+    )
+    run = CrawlRun(search_config=cfg, status="completed")
+    db_session.add(run)
+    db_session.flush()
+    # 2 nahe Listings (~50m vom Center) im 1-km-Umkreis
+    _seed(db_session, size_class="1BR", price=100, reviews=10, airbnb_id="N1",
+          run=run, lat=38.7385, lng=-9.1057, amenities=["Wifi"], bedrooms_field=1)
+    _seed(db_session, size_class="1BR", price=100, reviews=12, airbnb_id="N2",
+          run=run, lat=38.7384, lng=-9.1054, amenities=["Wifi"], bedrooms_field=1)
+    # 1 fernes Listing (~5km weg) im 10-km-Umkreis, aber NICHT im 2-km
+    _seed(db_session, size_class="1BR", price=100, reviews=20, airbnb_id="FAR",
+          run=run, lat=38.79, lng=-9.10, amenities=["Wifi"], bedrooms_field=1)
+
+    matrix = compute_segment_matrix(db_session, cfg, 2.0, run)
+
+    assert len(matrix.map_listings) == 3        # alle 3 im 10-km-Pool
+    near_ids = {m.airbnb_id for m in matrix.map_listings if m.distance_km <= 2.0}
+    assert near_ids == {"N1", "N2"}
+    far = next(m for m in matrix.map_listings if m.airbnb_id == "FAR")
+    assert far.distance_km > 2.0
+    # is_best nur für aktive-Radius-Best-Cell-Mitglieder
+    assert far.is_best is False
+    # Best-Cell ist (1BR, Budget) → die beiden Near-Listings sind best
+    bests = [m for m in matrix.map_listings if m.is_best]
+    assert len(bests) == 2
+    assert {m.airbnb_id for m in bests} == {"N1", "N2"}
+
+
+def test_map_listing_truncates_amenities_and_description(db_session):
+    """amenities auf 10 gekappt, description auf 300 Zeichen."""
+    from airbi.db.models import SearchConfig
+    cfg = SearchConfig(
+        name="TruncCfg",
+        center_lat=38.7382, center_lng=-9.1055, center_label="X",
+        classification_config={"min_sample": 1},
+    )
+    run = CrawlRun(search_config=cfg, status="completed")
+    db_session.add(run); db_session.flush()
+    many_amenities = [f"Item{i}" for i in range(20)]
+    long_desc = "x" * 500
+    listing = Listing(
+        airbnb_id="T1", city_slug="lisboa", district_slug=None,
+        lat=38.7385, lng=-9.1057, property_type="Apartment",
+        bedrooms=1, size_class="1BR", title="T1", url="https://x/T1",
+        amenities=many_amenities, description=long_desc, is_superhost=False,
+    )
+    db_session.add(listing); db_session.flush()
+    db_session.add(Snapshot(listing_id=listing.id, crawl_run_id=run.id,
+                            price=Decimal("100"), review_count=5, rating=4.7))
+    # zweites Listing, damit price_percentile berechenbar
+    _seed(db_session, size_class="1BR", price=120, reviews=5, airbnb_id="T2",
+          run=run, lat=38.7384, lng=-9.1054, bedrooms_field=1)
+
+    matrix = compute_segment_matrix(db_session, cfg, 2.0, run)
+    target = next(m for m in matrix.map_listings if m.airbnb_id == "T1")
+    assert len(target.amenities) == 10
+    assert len(target.description) == 300
 
 
 def test_compute_segment_matrix_respects_search_config_classification_config(db_session):

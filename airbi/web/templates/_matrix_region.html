@@ -114,6 +114,33 @@
         </div>
       </details>
 
+      {# ============ MARKTKARTE (Brief §9) ============ #}
+      {% if matrix.map_listings %}
+        <section class="mb-6">
+          <header class="mb-2">
+            <h3 class="text-sm font-semibold text-slate-900">Marktkarte</h3>
+            <p class="text-[11px] text-slate-500">
+              Eingefärbt nach Luxusklasse (gegen Aktiv-Radius-Kohorte). Best-Cell-Mitglieder mit goldenem Ring. Klick auf eine Property → Details rechts.
+            </p>
+          </header>
+          <div class="flex flex-wrap gap-3 mb-2 text-[11px] text-slate-600">
+            <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle" style="background:#a855f7"></span>Luxury</span>
+            <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle" style="background:#22c55e"></span>Premium</span>
+            <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle" style="background:#3b82f6"></span>Mid</span>
+            <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle" style="background:#94a3b8"></span>Budget</span>
+            <span><span class="inline-block w-2 h-2 mr-1 align-middle border-2 border-amber-500 bg-white rounded-full"></span>Best-Cell</span>
+            <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle border-2 border-white" style="background:#dc2626;outline:1px solid #dc2626"></span>★ Zielobjekt</span>
+          </div>
+          <div class="grid gap-3 lg:grid-cols-[1fr_340px]">
+            <div id="airbi-map" class="rounded-lg border border-slate-200 bg-white"></div>
+            <aside id="map-detail" class="empty rounded-lg border border-slate-200 bg-white overflow-y-auto text-sm" style="max-height: 540px;">
+              Klick auf eine Property in der Karte → Details hier.
+            </aside>
+          </div>
+          <script type="application/json" id="airbi-map-data">{{ matrix.map_data | tojson | safe }}</script>
+        </section>
+      {% endif %}
+
       {# ============ ANDERE CHANCEN-SEGMENTE (Brief §8.2) ============ #}
       {% if matrix.underserved %}
         <section class="mb-6">

@@ -5,13 +5,113 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}AirBI Dashboard{% endblock %}</title>
     <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
     <script src="https://unpkg.com/htmx.org@1.9.12"
             integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2"
             crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+    <style>
+      #airbi-map { height: 540px; }
+      #map-detail.empty { color: #94a3b8; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; }
+      .leaflet-tooltip.airbi-tip { background: rgba(15,23,42,0.92); color: #fff; border: none; border-radius: 6px; padding: 6px 9px; font-size: 11.5px; line-height: 1.4; }
+      .leaflet-tooltip.airbi-tip::before { border-top-color: rgba(15,23,42,0.92); }
+    </style>
   </head>
   <body class="min-h-screen bg-slate-50 text-slate-900">
     <main class="mx-auto max-w-7xl px-6 py-8">
       {% block content %}{% endblock %}
     </main>
+    <script>
+      // ====================================================================
+      // AirBI Karten-View — globale Init-Funktion. Wird nach jedem
+      // htmx:afterSettle aufgerufen, weil das Matrix-Region-Partial die
+      // Map-Section bei jedem Radius-Wechsel frisch ausliefert.
+      // ====================================================================
+      window.AIRBI_MAP_INSTANCE = null;
+      window.initAirbiMap = function () {
+        var mapEl = document.getElementById('airbi-map');
+        var dataEl = document.getElementById('airbi-map-data');
+        var panel = document.getElementById('map-detail');
+        if (!mapEl || !dataEl || !panel || typeof L === 'undefined') return;
+        var data;
+        try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
+        if (!data || !data.center) return;
+
+        // Alte Instanz aufräumen (bei Partial-Swap kommt frischer Container,
+        // aber zur Sicherheit destroyen wir die alte explizit).
+        if (window.AIRBI_MAP_INSTANCE) {
+          try { window.AIRBI_MAP_INSTANCE.remove(); } catch (e) {}
+          window.AIRBI_MAP_INSTANCE = null;
+        }
+
+        var LUX_COLOR = { 'Budget': '#94a3b8', 'Mid': '#3b82f6', 'Premium': '#22c55e', 'Luxury': '#a855f7', 'unclassified': '#cbd5e1' };
+
+        var map = L.map(mapEl).setView([data.center.lat, data.center.lng], 13);
+        window.AIRBI_MAP_INSTANCE = map;
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+
+        (data.radii_km || []).forEach(function (r) {
+          L.circle([data.center.lat, data.center.lng], {
+            radius: r * 1000, color: '#1d4ed8', opacity: 0.45, weight: 1,
+            fillColor: '#3b82f6', fillOpacity: 0.025, interactive: false,
+          }).addTo(map);
+        });
+
+        function renderDetail(l) {
+          panel.classList.remove('empty');
+          var price = l.price ? '&euro;' + Math.round(l.price) : '&mdash;';
+          var rating = l.rating != null ? l.rating.toFixed(2) : '&mdash;';
+          var rooms = (l.bedrooms != null ? l.bedrooms + ' SZ' : '?') + ' &middot; ' + (l.beds != null ? l.beds + ' Betten' : '? Betten') + ' &middot; ' + (l.max_guests != null ? l.max_guests + ' G&auml;ste' : '? G&auml;ste');
+          var amenitiesHtml = (l.amenities || []).map(function (a) { return '<span class="inline-block text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 mr-1 mb-1">' + a + '</span>'; }).join('');
+          var esc = function (s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+          panel.innerHTML =
+            '<div class="text-[15px] font-semibold leading-tight mb-1">' + esc(l.title) + '</div>' +
+            '<div class="mb-2">' +
+              '<span class="inline-block text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 mr-1">' + l.size_class + ' &middot; ' + l.luxury_class + '</span>' +
+              (l.is_best ? '<span class="inline-block text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 mr-1">&#9733; Best-Cell</span>' : '') +
+              (l.is_superhost ? '<span class="inline-block text-[11px] px-2 py-0.5 rounded bg-cyan-50 text-cyan-700">Superhost</span>' : '') +
+            '</div>' +
+            '<div class="grid grid-cols-3 gap-2 my-3">' +
+              '<div class="bg-slate-50 rounded p-2"><div class="text-base font-semibold">' + price + '</div><div class="text-[9px] uppercase tracking-wide text-slate-400">/Nacht</div></div>' +
+              '<div class="bg-slate-50 rounded p-2"><div class="text-base font-semibold">' + l.reviews + '</div><div class="text-[9px] uppercase tracking-wide text-slate-400">Bew.</div></div>' +
+              '<div class="bg-slate-50 rounded p-2"><div class="text-base font-semibold">' + rating + '</div><div class="text-[9px] uppercase tracking-wide text-slate-400">Rating</div></div>' +
+            '</div>' +
+            '<div class="border-t border-slate-100 pt-2 mt-2 text-[12px]"><div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Raum</div>' + rooms + '</div>' +
+            '<div class="border-t border-slate-100 pt-2 mt-2 text-[12px]"><div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Distanz</div>' + l.distance_km + ' km</div>' +
+            (l.amenity_score != null ? '<div class="border-t border-slate-100 pt-2 mt-2 text-[12px]"><div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Amenity-Score</div>' + l.amenity_score + '</div>' : '') +
+            (amenitiesHtml ? '<div class="border-t border-slate-100 pt-2 mt-2"><div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Ausstattung</div>' + amenitiesHtml + '</div>' : '') +
+            (l.description ? '<div class="border-t border-slate-100 pt-2 mt-2"><div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Beschreibung</div><div class="text-[12px] text-slate-600 max-h-24 overflow-y-auto">' + esc(l.description) + '&hellip;</div></div>' : '') +
+            (l.url ? '<a class="inline-block mt-3 px-3 py-1.5 bg-slate-900 text-white rounded text-[12px] font-medium" href="' + l.url + '" target="_blank" rel="noreferrer">Bei Airbnb &ouml;ffnen &rarr;</a>' : '');
+        }
+
+        (data.listings || []).forEach(function (l) {
+          var fill = LUX_COLOR[l.luxury_class] || '#cbd5e1';
+          var m = L.circleMarker([l.lat, l.lng], {
+            radius: l.is_best ? 6 : 4,
+            color: l.is_best ? '#f59e0b' : '#fff',
+            weight: l.is_best ? 2.5 : 1,
+            fillColor: fill, fillOpacity: 0.85,
+          });
+          var price = l.price ? '&euro;' + Math.round(l.price) + '/Nacht' : '&mdash;';
+          m.bindTooltip('<strong>' + (l.title || '(ohne Titel)') + '</strong><br/>' + l.size_class + ' &middot; ' + l.luxury_class + ' &middot; ' + price + ' &middot; ' + l.reviews + ' Bew.', { className: 'airbi-tip', direction: 'top' });
+          m.on('click', function () { renderDetail(l); });
+          m.addTo(map);
+        });
+
+        var targetIcon = L.divIcon({
+          html: '<div style="background:#dc2626;width:16px;height:16px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 2px #dc2626"></div>',
+          iconSize: [16, 16], iconAnchor: [8, 8], className: 'target-marker',
+        });
+        L.marker([data.center.lat, data.center.lng], { icon: targetIcon, zIndexOffset: 1000 })
+          .addTo(map).bindTooltip('<strong>&#9733; ' + data.center.label + '</strong>', { className: 'airbi-tip', direction: 'top' });
+      };
+
+      // Initial-Load und nach jedem HTMX-Swap re-init.
+      document.addEventListener('DOMContentLoaded', window.initAirbiMap);
+      document.body.addEventListener('htmx:afterSettle', window.initAirbiMap);
+    </script>
   </body>
 </html>
