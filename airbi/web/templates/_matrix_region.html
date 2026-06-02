@@ -8,37 +8,137 @@
     Im gewählten Umkreis liegen im aktuellen Datenstand keine Apartments vor.
   </div>
 {% else %}
-  <div class="grid gap-6 {% if matrices|length > 1 %}lg:grid-cols-2{% endif %}">
-    {% for matrix in matrices %}
-      <article class="rounded-lg border border-slate-200 bg-white p-5">
-        <header class="mb-4 flex items-baseline justify-between">
-          <h2 class="text-lg font-semibold">
-            Marktübersicht · Umkreis {{ matrix.radius_km|int }} km
+  {% for matrix in matrices %}
+    {% set has_best = matrix.best_cell is not none %}
+    {% if has_best %}
+      {% set bsize, blux = matrix.best_cell %}
+      {% set bcell = matrix.cell(bsize, blux) %}
+    {% endif %}
+    {% set rate_pct = (matrix.review_rate * 100)|round|int %}
+    {% set center = matrix.center_label or "das Zielobjekt" %}
+    {% set radius_int = matrix.radius_km|int %}
+
+    <article>
+      {# ============ HERO-EMPFEHLUNG ============ #}
+      {% if has_best %}
+        <section class="rounded-t-2xl bg-gradient-to-br from-slate-900 to-slate-800 px-6 py-6 sm:px-8 sm:py-7 text-white shadow-lg">
+          <div class="text-[10px] uppercase tracking-[0.12em] text-slate-400 mb-1">
+            Empfehlung
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-semibold leading-tight">
+            {% if bsize == "Studio" %}Studio
+            {% elif bsize == "1BR" %}1 Schlafzimmer
+            {% elif bsize == "2BR" %}2 Schlafzimmer
+            {% elif bsize == "3BR+" %}3+ Schlafzimmer
+            {% else %}{{ bsize }}{% endif %}
+            · {{ blux }}
           </h2>
-          <span class="rounded bg-slate-100 px-2 py-0.5 text-xs uppercase
-                       tracking-wide text-slate-500"
-                title="Wir können Buchungen nicht direkt zählen. Mehr Bewertungen ≈ mehr Buchungen über die Lebenszeit (Annahme: ~{{ (matrix.review_rate * 100)|round|int }}% der Gäste bewerten).">
+          <p class="mt-1 text-sm text-slate-300">
+            die attraktivste Kombination im Umkreis von {{ radius_int }} km um {{ center }}
+          </p>
+          <div class="mt-5 grid grid-cols-3 gap-4 border-t border-white/10 pt-4">
+            <div>
+              <div class="text-2xl font-semibold">{{ bcell.n }}</div>
+              <div class="text-[10px] uppercase tracking-wide text-slate-400">Wettbewerber</div>
+            </div>
+            <div>
+              <div class="text-2xl font-semibold">{% if bcell.adr %}€{{ bcell.adr|int }}{% else %}–{% endif %}</div>
+              <div class="text-[10px] uppercase tracking-wide text-slate-400">Median pro Nacht</div>
+            </div>
+            <div>
+              <div class="text-2xl font-semibold">{{ bcell.score|round(0)|int }}</div>
+              <div class="text-[10px] uppercase tracking-wide text-slate-400">Ø Bewertungen je Apt</div>
+            </div>
+          </div>
+        </section>
+      {% else %}
+        <section class="rounded-t-2xl bg-slate-100 border border-slate-200 px-6 py-6 sm:px-8 sm:py-7 text-slate-700">
+          <div class="text-[10px] uppercase tracking-[0.12em] text-slate-500 mb-1">
+            Empfehlung
+          </div>
+          <h2 class="text-2xl font-semibold leading-tight text-slate-900">
+            Datenbasis zu dünn
+          </h2>
+          <p class="mt-2 text-sm text-slate-600">
+            Im Umkreis von {{ radius_int }} km um {{ center }} gibt es noch keine Zelle mit mindestens {{ matrix.min_sample }} vergleichbaren Apartments — versuche einen größeren Umkreis.
+          </p>
+        </section>
+      {% endif %}
+
+      {# ============ INVESTMENT-BRIEF (ausklappbar) ============ #}
+      <details class="rounded-b-2xl border border-t-0 border-slate-200 bg-white mb-6 group">
+        <summary class="cursor-pointer list-none flex items-center justify-between px-6 py-3 text-sm text-blue-600 font-medium hover:bg-slate-50">
+          <span>📄 Investment-Brief — volle Begründung, Top-Performer-Profil und Methodik</span>
+          <span class="text-base group-open:rotate-180 transition-transform">▾</span>
+        </summary>
+        <div class="border-t border-slate-100 bg-slate-50 px-6 py-5 text-[13px] leading-relaxed text-slate-800 space-y-3" style="font-family: Georgia, 'Times New Roman', serif;">
+          {% if has_best %}
+            <p>
+              <strong>
+                Im Umkreis von {{ radius_int }} km um {{ center }} lohnt sich aktuell vor allem
+                {% if bsize == "Studio" %}Studio
+                {% elif bsize == "1BR" %}1-Schlafzimmer
+                {% elif bsize == "2BR" %}2-Schlafzimmer
+                {% elif bsize == "3BR+" %}3+ Schlafzimmer
+                {% else %}{{ bsize }}{% endif %}
+                im {{ blux }}-Segment.
+              </strong>
+              Von {{ matrix.listing_count }} vergleichbaren Apartments entfallen {{ bcell.n }} auf diese Klasse, mit durchschnittlich {{ bcell.score|round(0)|int }} Bewertungen je Apartment — der stärkste verfügbare Hinweis darauf, dass die Nachfrage das Angebot trägt.
+            </p>
+            {% set profile = matrix.top_performer_profile %}
+            {% if profile and profile.count > 0 %}
+              <p>
+                <strong>Profil der Top-Performer.</strong>
+                Typisch:
+                {% if profile.median_bedrooms is not none %}
+                  {{ profile.median_bedrooms }} {% if profile.median_bedrooms == 1 %}Schlafzimmer{% else %}Schlafzimmer{% endif %}{% if profile.median_beds is not none %}, {{ profile.median_beds }} {% if profile.median_beds == 1 %}Bett{% else %}Betten{% endif %}{% endif %}{% if profile.median_max_guests is not none %}, bis zu {{ profile.median_max_guests }} Gäste{% endif %}.
+                {% endif %}
+                {% if profile.superhost_share is not none %}
+                  In {{ (profile.superhost_share * 100)|round|int }} % der Fälle vom Superhost geführt.
+                {% endif %}
+                {% if profile.common_amenities %}
+                  Häufige Ausstattung:
+                  {% for name, share in profile.common_amenities %}<em>{{ name }}</em> ({{ (share * 100)|round|int }} %){% if not loop.last %}, {% endif %}{% endfor %}.
+                {% endif %}
+                {% if profile.price_median is not none %}
+                  Mittel-ADR €{{ profile.price_median|int }}{% if profile.price_min is not none and profile.price_max is not none %}, Spanne €{{ profile.price_min|int }} – €{{ profile.price_max|int }}{% endif %}.
+                {% endif %}
+              </p>
+            {% endif %}
+          {% endif %}
+          <p style="font-family: system-ui, -apple-system, sans-serif;" class="text-[12px] text-slate-600 bg-white border-l-4 border-slate-300 rounded px-3 py-2">
+            <strong>Methodik.</strong>
+            Nachfrage wird aus dem Bewertungs-Volumen abgeleitet (Annahme: ~{{ rate_pct }} % der Gäste bewerten). Das ist ein <em>Indikator</em>, keine gemessene Auslastung.
+            Die Luxusklasse ist ein gewichteter Index aus Preis-Perzentil (Umkreis-Kohorte) und Amenity-Score.
+          </p>
+        </div>
+      </details>
+
+      {# ============ MARKTÜBERSICHT (sekundär) ============ #}
+      <section class="mb-6">
+        <header class="flex items-baseline justify-between mb-2">
+          <h3 class="text-sm font-semibold text-slate-900">Marktübersicht · Umkreis {{ radius_int }} km</h3>
+          <span class="rounded bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500"
+                title="Mehr Bewertungen ≈ mehr Buchungen über die Lebenszeit (Annahme: ~{{ rate_pct }}% der Gäste bewerten).">
             geschätzte Nachfrage ⓘ
           </span>
         </header>
-
         <div class="overflow-x-auto">
-          <table class="w-full border-separate border-spacing-1 text-sm">
+          <table class="w-full border-separate border-spacing-1 text-xs">
             <thead>
               <tr>
-                <th class="w-32 text-left text-xs font-medium uppercase
-                           tracking-wide text-slate-500">Apartment-Größe ↓ / Luxusklasse →</th>
+                <th class="w-32 text-left text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                  Apartment-Größe ↓ / Luxusklasse →
+                </th>
                 {% for tier in matrix.luxury_classes %}
-                  <th class="px-2 py-1 text-left text-xs font-medium uppercase
-                             tracking-wide text-slate-500">{{ tier }}</th>
+                  <th class="px-2 py-1 text-left text-[10px] font-medium uppercase tracking-wide text-slate-500">{{ tier }}</th>
                 {% endfor %}
               </tr>
             </thead>
             <tbody>
               {% for size in matrix.size_classes %}
                 <tr>
-                  <th class="px-2 py-1 text-left text-xs font-medium
-                             text-slate-500">
+                  <th class="px-2 py-1 text-left text-[11px] font-medium text-slate-500">
                     {% if size == "Studio" %}Studio
                     {% elif size == "1BR" %}1 Schlafzimmer
                     {% elif size == "2BR" %}2 Schlafzimmer
@@ -53,25 +153,19 @@
                                {% elif cell.heat == 2 %}bg-emerald-200
                                {% elif cell.heat == 1 %}bg-emerald-100
                                {% else %}bg-slate-100 text-slate-400{% endif %}
-                               {% if matrix.best_cell == (size, tier) %}
-                                 ring-2 ring-amber-500
-                               {% endif %}"
+                               {% if matrix.best_cell == (size, tier) %}ring-2 ring-amber-500{% endif %}"
                         title="{{ size }} · {{ tier }} — Durchschnittliche Bewertungen je Apartment, Anzahl Wettbewerber und Mittel-Preis pro Nacht. Die Luxusklasse kombiniert Preis und Ausstattung.">
                       {% if cell.n == 0 %}
-                        <span class="text-xs">—</span>
+                        <span class="text-[11px]">—</span>
                       {% else %}
-                        <div class="text-xs">
+                        <div class="text-[11px]">
                           {% if cell.is_thin %}
-                            <span class="rounded bg-white/60 px-1
-                                         text-[10px] uppercase text-slate-500">Stichprobe klein</span>
+                            <span class="rounded bg-white/60 px-1 text-[9px] uppercase text-slate-500">Stichprobe klein</span>
                           {% endif %}
-                          <span class="font-semibold">
-                            {{ cell.score|round(0)|int }} Bew./Apt
-                          </span>
+                          <span class="font-semibold">{{ cell.score|round(0)|int }} Bew./Apt</span>
                         </div>
-                        <div class="text-[11px] opacity-80">
-                          {{ cell.n }} Wettb. ·
-                          €{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}/N.
+                        <div class="text-[10px] opacity-80">
+                          {{ cell.n }} Wettb. · €{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}/N.
                         </div>
                       {% endif %}
                     </td>
@@ -81,90 +175,43 @@
             </tbody>
           </table>
         </div>
+      </section>
 
-        <section class="mt-6">
-          <h3 class="text-sm font-medium uppercase tracking-wide text-slate-500">
-            Top-Apartments
-          </h3>
-          <p class="mt-1 text-xs italic text-slate-400">
-            Sortiert nach Bewertungen — dem stärksten verfügbaren Buchungs-Indikator
-          </p>
-          {% if matrix.top_performers %}
-            <ul class="mt-2 divide-y divide-slate-100">
-              {% for perf in matrix.top_performers %}
-                <li class="flex items-baseline justify-between py-2 text-sm">
-                  <div>
-                    {% if perf.url %}
-                      <a href="{{ perf.url }}" class="font-medium text-slate-900 hover:underline"
-                         target="_blank" rel="noreferrer">{{ perf.title or perf.airbnb_id }}</a>
-                    {% else %}
-                      <span class="font-medium text-slate-900">{{ perf.title or perf.airbnb_id }}</span>
-                    {% endif %}
-                    <span class="ml-2 rounded bg-slate-100 px-1.5 py-0.5
-                                 text-[11px] text-slate-600">
-                      {% if perf.size_class == "Studio" %}Studio
-                      {% elif perf.size_class == "1BR" %}1 SZ
-                      {% elif perf.size_class == "2BR" %}2 SZ
-                      {% elif perf.size_class == "3BR+" %}3+ SZ
-                      {% else %}{{ perf.size_class }}{% endif %}
-                      · {{ perf.luxury_class }}
-                    </span>
-                  </div>
-                  <div class="text-xs text-slate-500">
-                    {{ perf.review_count }} Bewertungen
-                    {% if perf.rating %} · ★ {{ "%.2f"|format(perf.rating) }}{% endif %}
-                  </div>
-                </li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            <p class="mt-2 text-sm text-slate-500">
-              Keine Top-Apartments mit klassifizierter Größe in diesem Bezirk.
-            </p>
-          {% endif %}
-        </section>
-
-        {% if matrix.best_cell %}
-          {% set size, tier = matrix.best_cell %}
-          {% set cell = matrix.cell(size, tier) %}
-          <section class="mt-6 rounded-md border-l-4 border-amber-500 bg-amber-50 p-4">
-            <h3 class="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-900">
-              Empfehlung — am attraktivsten
-            </h3>
-            <p class="text-sm text-amber-950">
-              <strong>
-                {% if size == "Studio" %}Studio
-                {% elif size == "1BR" %}1 Schlafzimmer
-                {% elif size == "2BR" %}2 Schlafzimmer
-                {% elif size == "3BR+" %}3+ Schlafzimmer
-                {% else %}{{ size }}{% endif %}
-                · {{ tier }}.
-              </strong>
-              Im Schnitt {{ cell.score|round(0)|int }} Bewertungen pro Apartment bei
-              {{ cell.n }} Wettbewerber{% if cell.n != 1 %}n{% endif %},
-              Mittel-Preis €{% if cell.adr %}{{ cell.adr|int }}{% else %}–{% endif %}/Nacht.
-            </p>
-            <p class="mt-2 text-xs italic text-amber-800">
-              Nachfragewerte sind ein Indikator (~{{ (matrix.review_rate * 100)|round|int }}% der
-              Gäste bewerten), keine gemessene Auslastung.
-            </p>
-          </section>
+      {# ============ TOP-APARTMENTS (kompakt) ============ #}
+      <section>
+        <h3 class="text-sm font-semibold text-slate-900">Top-Apartments</h3>
+        <p class="mt-0.5 text-[11px] italic text-slate-400">
+          Sortiert nach Bewertungen — dem stärksten verfügbaren Buchungs-Indikator
+        </p>
+        {% if matrix.top_performers %}
+          <ul class="mt-2 divide-y divide-slate-100 border-t border-slate-100">
+            {% for perf in matrix.top_performers %}
+              <li class="flex items-baseline justify-between py-2 text-sm">
+                <div class="min-w-0">
+                  {% if perf.url %}
+                    <a href="{{ perf.url }}" class="font-medium text-slate-900 hover:underline" target="_blank" rel="noreferrer">{{ perf.title or perf.airbnb_id }}</a>
+                  {% else %}
+                    <span class="font-medium text-slate-900">{{ perf.title or perf.airbnb_id }}</span>
+                  {% endif %}
+                  <span class="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">
+                    {% if perf.size_class == "Studio" %}Studio
+                    {% elif perf.size_class == "1BR" %}1 SZ
+                    {% elif perf.size_class == "2BR" %}2 SZ
+                    {% elif perf.size_class == "3BR+" %}3+ SZ
+                    {% else %}{{ perf.size_class }}{% endif %}
+                    · {{ perf.luxury_class }}
+                  </span>
+                </div>
+                <div class="shrink-0 text-xs text-slate-500">
+                  {{ perf.review_count }} Bewertungen{% if perf.rating %} · ★ {{ "%.2f"|format(perf.rating) }}{% endif %}
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
         {% else %}
-          <section class="mt-6 rounded-md border-l-4 border-slate-400 bg-slate-50 p-4">
-            <h3 class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
-              Empfehlung — noch nicht möglich
-            </h3>
-            <p class="text-sm text-slate-700">
-              Die Datenbasis ist noch zu klein für eine belastbare Empfehlung.
-              Wir brauchen mindestens {{ matrix.min_sample }} vergleichbare Apartments pro Feld.
-            </p>
-            <p class="mt-2 rounded bg-slate-100 px-3 py-2 text-xs text-slate-700">
-              <strong>Hebel:</strong> Größerer Untersuchungsbereich, oder weitere Crawl-Läufe
-              über Zeit — jeder bringt neue Apartments.
-            </p>
-          </section>
+          <p class="mt-2 text-sm text-slate-500">Keine Top-Apartments mit klassifizierter Größe in diesem Umkreis.</p>
         {% endif %}
-      </article>
-    {% endfor %}
-  </div>
+      </section>
+    </article>
+  {% endfor %}
 {% endif %}

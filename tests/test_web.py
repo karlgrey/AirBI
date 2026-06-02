@@ -64,15 +64,14 @@ def _seed_marvila(session):
 
 
 def test_dashboard_renders_matrix_and_panel(client, db_session):
-    cfg = _seed_marvila(db_session)
+    _seed_marvila(db_session)
     response = client.get("/")
     assert response.status_code == 200
     body = response.text
-    assert cfg.name in body
     assert "R. Cap. Leitão 86" in body
     assert "Marktübersicht" in body
-    # CrawlRun-Status-Panel.
-    assert "vollständig erfasst" in body
+    # Datenstand sitzt jetzt im Header (kein Footer-Status bei completed).
+    assert "Datenstand" in body
     # Mindestens ein Listing-Titel taucht in den Top-Performern auf.
     assert "Marvila Loft" in body
     # Proxy-Kennzeichnung sichtbar.
@@ -107,13 +106,6 @@ def test_dashboard_radius_buttons_use_htmx(client, db_session):
     assert "hx-target=\"#matrix-region\"" in body
 
 
-def test_dashboard_has_onboarding_box(client, db_session):
-    _seed_marvila(db_session)
-    response = client.get("/")
-    body = response.text
-    assert "So liest du dieses Dashboard" in body
-
-
 def test_dashboard_uses_untersuchungsbereich_label(client, db_session):
     _seed_marvila(db_session)
     response = client.get("/")
@@ -141,7 +133,7 @@ def test_dashboard_ships_radius_button_click_highlighter(client, db_session):
     assert "addEventListener('click'" in body
 
 
-def test_dashboard_footer_shows_datenstand(client, db_session):
+def test_dashboard_header_shows_datenstand(client, db_session):
     _seed_marvila(db_session)
     response = client.get("/")
     body = response.text
@@ -206,11 +198,17 @@ def test_matrix_empty_cell_uses_em_dash(client, db_session):
 
 
 def test_top_apartments_section_renamed(client, db_session):
+    """Die Top-Performer-Sektion heißt im UI 'Top-Apartments'.
+
+    'Top-Performer' darf im Investment-Brief vorkommen ('Profil der
+    Top-Performer.') — das ist die Konzept-Sprache, nicht der Section-Titel.
+    """
     _seed_marvila(db_session)
     response = client.get("/")
     body = response.text
     assert "Top-Apartments" in body
-    assert "Top-Performer" not in body
+    # Kein Section-Header mehr namens "Top-Performer" (alte Variante).
+    assert ">Top-Performer<" not in body
 
 
 def test_top_apartments_has_sort_explanation(client, db_session):
@@ -242,42 +240,29 @@ def test_top_apartments_use_compact_size_tags(client, db_session):
         assert "2BR" not in span, f"Slug '2BR' in tag-span: {span!r}"
 
 
-def test_recommendation_block_appears_below_top_apartments(client, db_session):
-    _seed_marvila(db_session)
+def test_hero_thin_state_when_no_best_cell(client, db_session):
+    """Wenn die Datenbasis dünn ist (alle Zellen unter min_sample): Hero zeigt
+    die Thin-Variante mit 'Datenbasis zu dünn' und Hinweis auf größeren Umkreis,
+    statt einer Empfehlungs-Schlagzeile."""
+    _seed_marvila(db_session)  # 6 Apartments → alle Zellen dünn (min_sample=3)
     response = client.get("/")
     body = response.text
-    top_idx = body.find("Top-Apartments")
-    # Em-dash + Leerzeichen ist eindeutig nur in den Block-Headlines
-    # ("Empfehlung — am attraktivsten" / "Empfehlung — noch nicht möglich")
-    # und kollidiert nicht mit dem "Empfehlung"-Wort in der Onboarding-Box.
-    rec_idx = body.find("Empfehlung — ")
-    assert top_idx > -1 and rec_idx > -1
-    assert top_idx < rec_idx
+    assert "Datenbasis zu dünn" in body
+    assert "größeren Umkreis" in body
+    # Alter Recommendation-Block ist weg.
+    assert "Empfehlung — noch nicht möglich" not in body
+    assert "Hebel:" not in body
 
 
-def test_thin_recommendation_shows_lever_hint(client, db_session):
-    _seed_marvila(db_session)  # Marvila Fixtures: 6 Apartments, alle Zellen dünn
-    response = client.get("/")
-    body = response.text
-    assert "Empfehlung — noch nicht möglich" in body
-    assert "Datenbasis ist noch zu klein" in body
-    assert "Hebel:" in body
-    assert "Untersuchungsbereich" in body  # auch in der Card-Überschrift, aber zusätzlich im Hebel-Text
-
-
-def test_winner_recommendation_includes_proxy_disclaimer(client, db_session):
-    """Wenn eine Best-Cell existiert: Empfehlungs-Block enthält den Hinweis,
-    dass die Nachfragewerte ein Indikator sind. Mit dem Seed reichen die
-    Marvila-Daten nicht für eine Best-Cell. Wir nehmen daher eine zweite
-    SearchConfig mit min_sample=1 und prüfen den Sieger-Block.
-    """
+def _seed_winner_config(db_session, *, amenities=None, is_superhost=True):
+    """Helper: SearchConfig + Listings, sodass eine Best-Cell entsteht
+    (min_sample=1, mehrere Listings im 2-km-Umkreis)."""
     from decimal import Decimal
     from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
-
     cfg = SearchConfig(
-        name="Test-Config-min1",
+        name="Winner-Config",
         center_lat=38.7391, center_lng=-9.1048, center_label="R. Cap. Leitão 86",
-        classification_config={"min_sample": 1},
+        classification_config={"min_sample": 1, "amenity_share_threshold": 0.5},
     )
     run = CrawlRun(search_config=cfg, status="completed", listings_seen=2)
     db_session.add(run)
@@ -285,8 +270,10 @@ def test_winner_recommendation_includes_proxy_disclaimer(client, db_session):
     for i, (price, reviews) in enumerate([(100, 50), (110, 60)]):
         listing = Listing(
             airbnb_id=f"W{i}", city_slug="lisboa", district_slug=None,
-            lat=38.7395, lng=-9.1050, property_type="Apartment", bedrooms=1,
+            lat=38.7395, lng=-9.1050, property_type="Apartment",
+            bedrooms=1, beds=2, max_guests=3, is_superhost=is_superhost,
             size_class="1BR", title=f"Winner {i}", url=f"https://x/W{i}",
+            amenities=list(amenities or ["Wifi", "Air conditioning", "River view"]),
         )
         db_session.add(listing)
         db_session.flush()
@@ -295,12 +282,73 @@ def test_winner_recommendation_includes_proxy_disclaimer(client, db_session):
             price=Decimal(str(price)), review_count=reviews, rating=4.7,
         ))
     db_session.flush()
+    return cfg
 
+
+def test_hero_renders_best_cell_with_kpi_labels(client, db_session):
+    """Hero-Card zeigt Empfehlung-Eyebrow, die Best-Cell als Schlagzeile
+    (Größe + Luxusklasse in Klartext) und die drei KPI-Labels."""
+    cfg = _seed_winner_config(db_session)
     response = client.get(f"/?config_id={cfg.id}&radius_km=2")
     body = response.text
-    assert "Empfehlung — am attraktivsten" in body
-    assert "Nachfragewerte sind ein Indikator" in body
+    # Eyebrow + Schlagzeile (Empfehlung erscheint nur noch im Hero)
+    assert "Empfehlung" in body
+    # Best-Cell wird als "Klartext-Größe · Luxusklasse" gerendert (mit
+    # Whitespace zwischen den Jinja-Blöcken — Browser kollabiert das).
+    assert "1 Schlafzimmer" in body
+    assert any(tier in body for tier in ("Budget", "Mid", "Premium", "Luxury"))
+    # 3 KPI-Labels
+    assert "Wettbewerber" in body
+    assert "Median pro Nacht" in body
+    assert "Ø Bewertungen je Apt" in body
+
+
+def test_investment_brief_is_collapsible_details_block(client, db_session):
+    """Investment-Brief ist ein natives <details>-Element mit klickbarem
+    <summary>. So funktioniert er ohne JS und ist screenreader-tauglich."""
+    cfg = _seed_winner_config(db_session)
+    body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
+    assert "<details" in body
+    assert "<summary" in body
+    assert "Investment-Brief" in body
+
+
+def test_brief_contains_methodology_with_proxy_disclaimer(client, db_session):
+    """Der Methodik-Absatz im Brief ersetzt den alten Proxy-Hinweis und ist
+    auch in der Thin-Variante vorhanden."""
+    _seed_marvila(db_session)
+    body = client.get("/").text
+    assert "Methodik" in body
+    assert "Indikator" in body
     assert "% der Gäste bewerten" in body
+
+
+def test_brief_contains_top_performer_profile(client, db_session):
+    """Mit Top-Performern + Detail-Daten enthält der Brief 'Profil der
+    Top-Performer' samt mindestens einer Amenity mit Prozentanteil sowie
+    Superhost-Quote in Prozent."""
+    cfg = _seed_winner_config(db_session)  # 2 Listings, beide Superhost, Wifi etc.
+    body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
+    assert "Profil der Top-Performer" in body
+    assert "Wifi" in body  # eine der seeded amenities
+    # Superhost-Quote als Prozent (beide Superhost → 100 %)
+    assert "100 %" in body or "100%" in body
+
+
+def test_dashboard_has_no_onboarding_box(client, db_session):
+    """Onboarding-Box wurde durch den selbsterklärenden Hero ersetzt."""
+    _seed_marvila(db_session)
+    body = client.get("/").text
+    assert "So liest du dieses Dashboard" not in body
+
+
+def test_dashboard_has_no_old_empfehlungs_block(client, db_session):
+    """Der alte 'Empfehlung — am attraktivsten/noch nicht möglich'-Block am
+    Ende ist entfallen (Hero ersetzt ihn vollständig)."""
+    cfg = _seed_winner_config(db_session)
+    body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
+    assert "Empfehlung — am attraktivsten" not in body
+    assert "Empfehlung — noch nicht möglich" not in body
 
 
 def test_matrix_axis_is_luxusklasse(client, db_session):
