@@ -302,10 +302,10 @@ def test_hero_renders_best_cell_with_kpi_labels(client, db_session):
     # Whitespace zwischen den Jinja-Blöcken — Browser kollabiert das).
     assert "1 Schlafzimmer" in body
     assert any(tier in body for tier in ("Budget", "Mid", "Premium", "Luxury"))
-    # 3 KPI-Labels
+    # 3 KPI-Labels (jetzt ausgeschrieben)
     assert "Wettbewerber" in body
     assert "Median pro Nacht" in body
-    assert "Ø Bewertungen je Apt" in body
+    assert "Ø Bewertungen je Apartment" in body
 
 
 def test_investment_brief_is_collapsible_details_block(client, db_session):
