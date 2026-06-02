@@ -32,7 +32,7 @@ cd /opt/airbi
 git pull --ff-only
 ~/.local/bin/uv sync --no-dev
 ~/.local/bin/uv run alembic upgrade head      # nur falls neue Migrationen
-sudo systemctl restart airbi-web
+sudo systemctl restart airbi-web               # IMMER, auch bei template-only-Änderungen
 curl -s localhost:8000/health                  # {"status":"ok"} erwarten
 ```
 
