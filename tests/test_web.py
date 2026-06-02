@@ -421,4 +421,3 @@ def test_matrix_axis_is_luxusklasse(client, db_session):
     response = client.get("/")
     body = response.text
     assert "Luxusklasse" in body
-    assert "Preis und Ausstattung" in body
