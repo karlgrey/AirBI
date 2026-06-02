@@ -48,6 +48,14 @@
 
         var LUX_COLOR = { 'Budget': '#94a3b8', 'Mid': '#3b82f6', 'Premium': '#22c55e', 'Luxury': '#a855f7', 'unclassified': '#cbd5e1' };
 
+        function sizeLabel(s) {
+          if (s === 'Studio') return 'Studio';
+          if (s === '1BR') return '1 Schlafzimmer';
+          if (s === '2BR') return '2 Schlafzimmer';
+          if (s === '3BR+') return '3+ Schlafzimmer';
+          return s;
+        }
+
         var map = L.map(mapEl).setView([data.center.lat, data.center.lng], 13);
         window.AIRBI_MAP_INSTANCE = map;
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -71,19 +79,19 @@
           panel.classList.remove('empty');
           var price = l.price ? '&euro;' + Math.round(l.price) : '&mdash;';
           var rating = l.rating != null ? l.rating.toFixed(2) : '&mdash;';
-          var rooms = (l.bedrooms != null ? l.bedrooms + ' SZ' : '?') + ' &middot; ' + (l.beds != null ? l.beds + ' Betten' : '? Betten') + ' &middot; ' + (l.max_guests != null ? l.max_guests + ' G&auml;ste' : '? G&auml;ste');
+          var rooms = (l.bedrooms != null ? l.bedrooms + ' Schlafzimmer' : '? Schlafzimmer') + ' &middot; ' + (l.beds != null ? l.beds + ' Betten' : '? Betten') + ' &middot; ' + (l.max_guests != null ? l.max_guests + ' G&auml;ste' : '? G&auml;ste');
           var amenitiesHtml = (l.amenities || []).map(function (a) { return '<span class="inline-block text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 mr-1 mb-1">' + a + '</span>'; }).join('');
           var esc = function (s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
           panel.innerHTML =
             '<div class="text-[15px] font-semibold leading-tight mb-1">' + esc(l.title) + '</div>' +
             '<div class="mb-2">' +
-              '<span class="inline-block text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 mr-1">' + l.size_class + ' &middot; ' + l.luxury_class + '</span>' +
-              (l.is_best ? '<span class="inline-block text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 mr-1">&#9733; Best-Cell</span>' : '') +
+              '<span class="inline-block text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 mr-1">' + sizeLabel(l.size_class) + ' &middot; ' + l.luxury_class + '</span>' +
+              (l.is_best ? '<span class="inline-block text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 mr-1">&#9733; Empfohlenes Segment</span>' : '') +
               (l.is_superhost ? '<span class="inline-block text-[11px] px-2 py-0.5 rounded bg-cyan-50 text-cyan-700">Superhost</span>' : '') +
             '</div>' +
             '<div class="grid grid-cols-3 gap-2 my-3">' +
               '<div class="bg-slate-50 rounded p-2"><div class="text-base font-semibold">' + price + '</div><div class="text-[9px] uppercase tracking-wide text-slate-400">/Nacht</div></div>' +
-              '<div class="bg-slate-50 rounded p-2"><div class="text-base font-semibold">' + l.reviews + '</div><div class="text-[9px] uppercase tracking-wide text-slate-400">Bew.</div></div>' +
+              '<div class="bg-slate-50 rounded p-2"><div class="text-base font-semibold">' + l.reviews + '</div><div class="text-[9px] uppercase tracking-wide text-slate-400">Bewertungen</div></div>' +
               '<div class="bg-slate-50 rounded p-2"><div class="text-base font-semibold">' + rating + '</div><div class="text-[9px] uppercase tracking-wide text-slate-400">Rating</div></div>' +
             '</div>' +
             '<div class="border-t border-slate-100 pt-2 mt-2 text-[12px]"><div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Raum</div>' + rooms + '</div>' +
@@ -103,7 +111,7 @@
             fillColor: fill, fillOpacity: 0.85,
           });
           var price = l.price ? '&euro;' + Math.round(l.price) + '/Nacht' : '&mdash;';
-          m.bindTooltip('<strong>' + (l.title || '(ohne Titel)') + '</strong><br/>' + l.size_class + ' &middot; ' + l.luxury_class + ' &middot; ' + price + ' &middot; ' + l.reviews + ' Bew.', { className: 'airbi-tip', direction: 'top' });
+          m.bindTooltip('<strong>' + (l.title || '(ohne Titel)') + '</strong><br/>' + sizeLabel(l.size_class) + ' &middot; ' + l.luxury_class + ' &middot; ' + price + ' &middot; ' + l.reviews + ' Bewertungen', { className: 'airbi-tip', direction: 'top' });
           m.on('click', function () { renderDetail(l); });
           m.addTo(map);
         });

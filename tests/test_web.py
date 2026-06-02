@@ -173,12 +173,15 @@ def test_matrix_uses_klartext_size_labels(client, db_session):
 
 
 def test_matrix_cell_uses_klartext_metrics(client, db_session):
+    """Matrix-Caption + Chancen-Karten verwenden ausgeschriebene Begriffe.
+    Matrix-Zellen selbst bleiben kompakt (Apt., /N.) und werden im Tooltip
+    erklärt."""
     _seed_marvila(db_session)
     response = client.get("/")
     body = response.text
-    assert "Bew./Apt" in body
-    assert "Wettb." in body
-    assert "/N." in body
+    assert "Bewertungen je Apartment" in body   # ausgeschrieben
+    assert "Wettbewerber" in body
+    assert "/N." in body                         # Matrix-Zelle bleibt kompakt
 
 
 def test_matrix_thin_marker_in_klartext(client, db_session):
@@ -221,12 +224,12 @@ def test_top_apartments_has_sort_explanation(client, db_session):
     assert "im Umkreis" in body
 
 
-def test_top_apartments_use_compact_size_tags(client, db_session):
+def test_top_apartments_use_klartext_size_tags(client, db_session):
     _seed_marvila(db_session)
     response = client.get("/")
     body = response.text
-    # Kompakt-Form für Top-Apartments-Tag: "1 SZ · ...", nicht "1BR · ..."
-    assert "1 SZ" in body or "2 SZ" in body
+    # Klartext-Form für Top-Apartments-Tag: "1 Schlafzimmer · ..." statt "1BR" oder "1 SZ".
+    assert "1 Schlafzimmer" in body or "2 Schlafzimmer" in body
     # Alter Slug-Stil darf nicht in sichtbaren Tag-Spans der Top-Apartments vorkommen.
     # "1BR · " und "2BR · " sind nur noch in title=-Tooltips der Tabelle erlaubt,
     # nicht im sichtbaren Span-Inhalt.
@@ -367,8 +370,8 @@ def test_underserved_section_renders_with_other_chance_cells(client, db_session)
     cfg = _seed_winner_config(db_session)  # 2 1BR-Listings (Budget + Mid)
     body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
     assert "Andere Chancen-Segmente" in body
-    # Mini-Card-Untertitel-Marker (Bew./Apt im KPI-Strip der Cards)
-    assert "Bew./Apt" in body
+    # KPI-Strip-Label im ausgeschriebenen Klartext
+    assert "Bewertungen je Apartment" in body
     # Prosa-Begründung pro Card (eines der zwei Wordings muss da sein)
     assert "Demand-Signal" in body or "unterversorgt" in body
 

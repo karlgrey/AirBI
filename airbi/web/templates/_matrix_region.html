@@ -47,7 +47,7 @@
             </div>
             <div>
               <div class="text-2xl font-semibold">{{ bcell.score|round(0)|int }}</div>
-              <div class="text-[10px] uppercase tracking-wide text-slate-400">Ø Bewertungen je Apt</div>
+              <div class="text-[10px] uppercase tracking-wide text-slate-400">Ø Bewertungen je Apartment</div>
             </div>
           </div>
         </section>
@@ -101,7 +101,7 @@
                   {% for name, share in profile.common_amenities %}<em>{{ name }}</em> ({{ (share * 100)|round|int }} %){% if not loop.last %}, {% endif %}{% endfor %}.
                 {% endif %}
                 {% if profile.price_median is not none %}
-                  Mittel-ADR €{{ profile.price_median|int }}{% if profile.price_min is not none and profile.price_max is not none %}, Spanne €{{ profile.price_min|int }} – €{{ profile.price_max|int }}{% endif %}.
+                  Mittel-Preis €{{ profile.price_median|int }} pro Nacht{% if profile.price_min is not none and profile.price_max is not none %}, Spanne €{{ profile.price_min|int }} – €{{ profile.price_max|int }}{% endif %}.
                 {% endif %}
               </p>
             {% endif %}
@@ -122,7 +122,7 @@
         </summary>
         <div class="border-t border-slate-100 px-4 py-4">
           <p class="text-[11px] text-slate-500 mb-3">
-            Heatmap-Färbung = Nachfrage je Apartment (dunkler = häufiger gebucht, ~{{ rate_pct }} % der Gäste bewerten). Goldumrandet: Empfehlung. Details je Zelle per Hover.
+            Heatmap-Färbung = Nachfrage je Apartment (dunkler = häufiger gebucht, ~{{ rate_pct }} % der Gäste bewerten). Goldumrandet: Empfehlung. Pro Zelle: <strong>Anzahl Apartments · Median-Preis pro Nacht</strong>; volle Details und Bewertungs-Zahl per Hover.
           </p>
           <div class="overflow-x-auto">
             <table class="w-full border-separate border-spacing-1 text-xs">
@@ -181,7 +181,7 @@
           <header class="mb-2">
             <h3 class="text-sm font-semibold text-slate-900">Andere Chancen-Segmente · Umkreis {{ radius_int }} km</h3>
             <p class="text-[11px] text-slate-500">
-              Rangiert nach Bew./Apt — die Empfehlung im Hero wird übersprungen.
+              Rangiert nach Bewertungen je Apartment — die Empfehlung im Hero wird übersprungen.
             </p>
           </header>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -190,9 +190,9 @@
                 <div class="flex items-baseline justify-between gap-2 mb-2">
                   <div class="text-sm font-semibold text-slate-900">
                     {% if seg.size_class == "Studio" %}Studio
-                    {% elif seg.size_class == "1BR" %}1 SZ
-                    {% elif seg.size_class == "2BR" %}2 SZ
-                    {% elif seg.size_class == "3BR+" %}3+ SZ
+                    {% elif seg.size_class == "1BR" %}1 Schlafzimmer
+                    {% elif seg.size_class == "2BR" %}2 Schlafzimmer
+                    {% elif seg.size_class == "3BR+" %}3+ Schlafzimmer
                     {% else %}{{ seg.size_class }}{% endif %}
                     · {{ seg.luxury_class }}
                   </div>
@@ -203,15 +203,15 @@
                 <div class="grid grid-cols-3 gap-2 text-center">
                   <div>
                     <div class="text-base font-semibold text-slate-900">{{ seg.n }}</div>
-                    <div class="text-[9px] uppercase tracking-wide text-slate-400">Wettb.</div>
+                    <div class="text-[9px] uppercase tracking-wide text-slate-400 leading-tight">Wettbewerber</div>
                   </div>
                   <div>
                     <div class="text-base font-semibold text-slate-900">{% if seg.adr %}€{{ seg.adr|int }}{% else %}–{% endif %}</div>
-                    <div class="text-[9px] uppercase tracking-wide text-slate-400">€/Nacht</div>
+                    <div class="text-[9px] uppercase tracking-wide text-slate-400 leading-tight">Median pro Nacht</div>
                   </div>
                   <div>
                     <div class="text-base font-semibold text-slate-900">{{ seg.score|round(0)|int }}</div>
-                    <div class="text-[9px] uppercase tracking-wide text-slate-400">Bew./Apt</div>
+                    <div class="text-[9px] uppercase tracking-wide text-slate-400 leading-tight">Ø Bewertungen je Apartment</div>
                   </div>
                 </div>
                 {% if seg.rationale %}
@@ -231,7 +231,7 @@
           <header class="mb-2">
             <h3 class="text-sm font-semibold text-slate-900">Marktkarte · Umkreis {{ radius_int }} km</h3>
             <p class="text-[11px] text-slate-500">
-              Eingefärbt nach Luxusklasse (gegen Aktiv-Radius-Kohorte). Best-Cell-Mitglieder mit goldenem Ring. Klick auf eine Property → Details rechts.
+              Eingefärbt nach Luxusklasse (gegen Aktiv-Radius-Kohorte). Mitglieder des empfohlenen Segments mit goldenem Ring. Klick auf eine Property → Details rechts.
             </p>
           </header>
           <div class="flex flex-wrap gap-3 mb-2 text-[11px] text-slate-600">
@@ -239,7 +239,7 @@
             <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle" style="background:#22c55e"></span>Premium</span>
             <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle" style="background:#3b82f6"></span>Mid</span>
             <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle" style="background:#94a3b8"></span>Budget</span>
-            <span><span class="inline-block w-2 h-2 mr-1 align-middle border-2 border-amber-500 bg-white rounded-full"></span>Best-Cell</span>
+            <span><span class="inline-block w-2 h-2 mr-1 align-middle border-2 border-amber-500 bg-white rounded-full"></span>Empfohlenes Segment</span>
             <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1 align-middle border-2 border-white" style="background:#dc2626;outline:1px solid #dc2626"></span>★ Zielobjekt</span>
           </div>
           <div class="grid gap-3 lg:grid-cols-[1fr_340px]">
@@ -257,7 +257,7 @@
         <h3 class="text-sm font-semibold text-slate-900">Top-Apartments · Umkreis {{ radius_int }} km</h3>
         <p class="mt-0.5 text-[11px] italic text-slate-400">
           {% if has_best %}
-            Konkrete Beispiele im empfohlenen Segment ({% if bsize == "Studio" %}Studio{% elif bsize == "1BR" %}1 SZ{% elif bsize == "2BR" %}2 SZ{% elif bsize == "3BR+" %}3+ SZ{% else %}{{ bsize }}{% endif %} · {{ blux }}), sortiert nach Bewertungen.
+            Konkrete Beispiele im empfohlenen Segment ({% if bsize == "Studio" %}Studio{% elif bsize == "1BR" %}1 Schlafzimmer{% elif bsize == "2BR" %}2 Schlafzimmer{% elif bsize == "3BR+" %}3+ Schlafzimmer{% else %}{{ bsize }}{% endif %} · {{ blux }}), sortiert nach Bewertungen.
           {% else %}
             Die populärsten Listings im Umkreis, sortiert nach Bewertungen.
           {% endif %}
@@ -274,9 +274,9 @@
                   {% endif %}
                   <span class="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">
                     {% if perf.size_class == "Studio" %}Studio
-                    {% elif perf.size_class == "1BR" %}1 SZ
-                    {% elif perf.size_class == "2BR" %}2 SZ
-                    {% elif perf.size_class == "3BR+" %}3+ SZ
+                    {% elif perf.size_class == "1BR" %}1 Schlafzimmer
+                    {% elif perf.size_class == "2BR" %}2 Schlafzimmer
+                    {% elif perf.size_class == "3BR+" %}3+ Schlafzimmer
                     {% else %}{{ perf.size_class }}{% endif %}
                     · {{ perf.luxury_class }}
                   </span>
