@@ -30,13 +30,15 @@ DEFAULT_INSIGHT_CONFIG: dict = {
     "min_sample": 3,        # Zellen mit weniger Listings gelten als "zu dünn".
     "review_rate": 0.40,    # Anteil bewertender Gäste (Briefing §3, ~30-50 %).
     "top_performers_per_segment": 2,
+    "amenity_share_threshold": 0.5,   # Anteil-Schwelle für "common amenities".
+    "common_amenities_max": 6,         # Max Items in TopPerformerProfile.common_amenities.
 }
 
 
 @dataclass
 class ListingRow:
-    """Ein Listing + sein Snapshot aus einem CrawlRun, bereits einem Bezirk
-    zugeordnet. Der reine Builder konsumiert nur diese Records."""
+    """Ein Listing + sein Snapshot aus einem CrawlRun. Der reine Builder
+    konsumiert nur diese Records."""
 
     airbnb_id: str
     title: str | None
@@ -46,6 +48,12 @@ class ListingRow:
     review_count: int
     rating: float | None
     amenity_score: float = 0.0
+    # Detail-Felder für TopPerformerProfile-Aggregation:
+    amenities: list = field(default_factory=list)
+    bedrooms: int | None = None
+    beds: int | None = None
+    max_guests: int | None = None
+    is_superhost: bool = False
 
 
 @dataclass
@@ -74,6 +82,23 @@ class TopPerformer:
 
 
 @dataclass
+class TopPerformerProfile:
+    """Aggregierte Merkmale der ausgewählten Top-Performer einer Matrix —
+    'was zeichnet sie aus' (Briefing §8.3)."""
+
+    count: int = 0
+    superhost_share: float | None = None        # 0..1
+    price_median: Decimal | None = None
+    price_min: Decimal | None = None
+    price_max: Decimal | None = None
+    median_bedrooms: int | None = None
+    median_beds: int | None = None
+    median_max_guests: int | None = None
+    # (Amenity-Name, Anteil 0..1), absteigend nach Anteil.
+    common_amenities: list = field(default_factory=list)
+
+
+@dataclass
 class SegmentMatrix:
     """Vollständiges Insight-Ergebnis für genau einen Umkreis + einen CrawlRun."""
 
@@ -86,6 +111,7 @@ class SegmentMatrix:
     best_cell: tuple[str, str] | None = None
     recommendation: str = ""
     top_performers: list[TopPerformer] = field(default_factory=list)
+    top_performer_profile: TopPerformerProfile | None = None
     listing_count: int = 0
     review_rate: float = DEFAULT_INSIGHT_CONFIG["review_rate"]
     min_sample: int = DEFAULT_INSIGHT_CONFIG["min_sample"]
@@ -129,6 +155,55 @@ def _build_recommendation(matrix: SegmentMatrix) -> str:
         f"Wettbewerber-Listings, Median-ADR €{adr}. Nachfrage ist ein Proxy "
         f"aus Review-Count (~{rate_pct}% der Gäste bewerten), keine gemessene "
         f"Auslastung."
+    )
+
+
+def _compute_top_performer_profile(
+    top_performers: list[TopPerformer],
+    rows: list[ListingRow],
+    config: dict,
+) -> TopPerformerProfile | None:
+    """Aggregiert gemeinsame Merkmale der ausgewählten Top-Performer
+    (Räume-Median, Superhost-Quote, Preis-Spanne, häufigste Amenities).
+
+    Rückgabe: None wenn keine Top-Performer oder keine zugehörigen Rows.
+    """
+    if not top_performers:
+        return None
+    rows_by_id = {r.airbnb_id: r for r in rows}
+    tp_rows = [rows_by_id[tp.airbnb_id] for tp in top_performers if tp.airbnb_id in rows_by_id]
+    if not tp_rows:
+        return None
+
+    n = len(tp_rows)
+    superhost_count = sum(1 for r in tp_rows if r.is_superhost)
+    prices = [r.price for r in tp_rows if r.price is not None]
+    bedrooms = [r.bedrooms for r in tp_rows if r.bedrooms is not None]
+    beds = [r.beds for r in tp_rows if r.beds is not None]
+    guests = [r.max_guests for r in tp_rows if r.max_guests is not None]
+
+    threshold = float(config.get("amenity_share_threshold", 0.5))
+    max_count = int(config.get("common_amenities_max", 6))
+    amenity_counts: dict[str, int] = {}
+    for r in tp_rows:
+        for a in (r.amenities or []):
+            if isinstance(a, str):
+                amenity_counts[a] = amenity_counts.get(a, 0) + 1
+    common = sorted(
+        ((name, count / n) for name, count in amenity_counts.items() if count / n >= threshold),
+        key=lambda x: (-x[1], x[0]),
+    )[:max_count]
+
+    return TopPerformerProfile(
+        count=n,
+        superhost_share=superhost_count / n,
+        price_median=Decimal(median(prices)).quantize(Decimal("1")) if prices else None,
+        price_min=min(prices) if prices else None,
+        price_max=max(prices) if prices else None,
+        median_bedrooms=int(median(bedrooms)) if bedrooms else None,
+        median_beds=int(median(beds)) if beds else None,
+        median_max_guests=int(median(guests)) if guests else None,
+        common_amenities=common,
     )
 
 
@@ -243,6 +318,9 @@ def build_segment_matrix(
     matrix.top_performers = _pick_top_performers(
         cell_rows, int(cfg["top_performers_per_segment"])
     )
+    matrix.top_performer_profile = _compute_top_performer_profile(
+        matrix.top_performers, rows, cfg
+    )
     return matrix
 
 
@@ -298,6 +376,11 @@ def compute_segment_matrix(
                     review_count=snap.review_count or 0,
                     rating=snap.rating,
                     amenity_score=listing.amenity_score or 0.0,
+                    amenities=listing.amenities or [],
+                    bedrooms=listing.bedrooms,
+                    beds=listing.beds,
+                    max_guests=listing.max_guests,
+                    is_superhost=bool(listing.is_superhost),
                 )
             )
     return build_segment_matrix(

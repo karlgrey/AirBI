@@ -8,6 +8,7 @@ from airbi.insights.segment_matrix import (
     ListingRow,
     SegmentMatrix,
     TopPerformer,
+    TopPerformerProfile,
     build_segment_matrix,
     compute_segment_matrix,
     latest_completed_run,
@@ -45,12 +46,16 @@ def test_segment_matrix_cell_lookup_returns_stored_cell():
     assert matrix.cell("1BR", "Premium") is cell
 
 
-def _row(airbnb_id, size_class, price, review_count, rating=4.5, amenity_score=0.0):
+def _row(airbnb_id, size_class, price, review_count, rating=4.5, amenity_score=0.0,
+         amenities=None, bedrooms=None, beds=None, max_guests=None, is_superhost=False):
     return ListingRow(
         airbnb_id=airbnb_id, title=f"L{airbnb_id}", url=f"https://x/{airbnb_id}",
         size_class=size_class,
         price=Decimal(str(price)) if price is not None else None,
         review_count=review_count, rating=rating, amenity_score=amenity_score,
+        amenities=list(amenities or []),
+        bedrooms=bedrooms, beds=beds, max_guests=max_guests,
+        is_superhost=is_superhost,
     )
 
 
@@ -227,13 +232,72 @@ def test_builder_amenity_score_shifts_listing_into_higher_luxury_class():
     assert "Premium" in classes_with_d or "Luxury" in classes_with_d
 
 
+def test_top_performer_profile_aggregates_medians_superhost_amenities():
+    # 4 Top-Performer-Listings im selben Segment, 3 davon Superhost,
+    # alle mit "Wifi", 3 von 4 mit "River view", 1 mit "Pool".
+    rows = [
+        _row("a", "1BR", 100, 90, amenities=["Wifi","River view"], bedrooms=1, beds=2, max_guests=3, is_superhost=True),
+        _row("b", "1BR", 120, 80, amenities=["Wifi","River view"], bedrooms=1, beds=2, max_guests=3, is_superhost=True),
+        _row("c", "1BR", 180, 70, amenities=["Wifi","River view","Pool"], bedrooms=1, beds=3, max_guests=4, is_superhost=True),
+        _row("d", "1BR", 260, 60, amenities=["Wifi"],                    bedrooms=2, beds=2, max_guests=3, is_superhost=False),
+    ]
+    matrix = build_segment_matrix(
+        rows,
+        config={"min_sample": 1, "top_performers_per_segment": 4,
+                "amenity_share_threshold": 0.5, "common_amenities_max": 4},
+        radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    profile = matrix.top_performer_profile
+    assert profile is not None
+    assert profile.count == 4
+    assert profile.superhost_share == 0.75
+    # Median bedrooms aus [1,1,1,2] = 1
+    assert profile.median_bedrooms == 1
+    # Median beds aus [2,2,3,2] = 2
+    assert profile.median_beds == 2
+    # Common amenities: Wifi 100%, River view 75% — Pool 25% fällt unter threshold raus.
+    names = [name for name, _ in profile.common_amenities]
+    shares = dict(profile.common_amenities)
+    assert "Wifi" in names and shares["Wifi"] == 1.0
+    assert "River view" in names and shares["River view"] == 0.75
+    assert "Pool" not in names
+    # Preis-Spanne über [100,120,180,260]
+    assert profile.price_min == Decimal("100")
+    assert profile.price_max == Decimal("260")
+
+
+def test_top_performer_profile_caps_common_amenities_at_max():
+    rows = [
+        _row(str(i), "1BR", 100, 50, amenities=["A","B","C","D","E","F","G","H"], bedrooms=1, beds=1)
+        for i in range(3)
+    ]
+    matrix = build_segment_matrix(
+        rows,
+        config={"min_sample": 1, "top_performers_per_segment": 3,
+                "amenity_share_threshold": 0.5, "common_amenities_max": 3},
+        radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    assert len(matrix.top_performer_profile.common_amenities) == 3
+
+
+def test_top_performer_profile_is_none_when_no_top_performers():
+    matrix = build_segment_matrix(
+        [], config={}, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    assert matrix.top_performer_profile is None
+
+
 def _seed(db_session, *, size_class, price, reviews, airbnb_id, run,
-          lat=38.7391, lng=-9.1048):
+          lat=38.7391, lng=-9.1048, amenities=None, bedrooms_field=1,
+          is_superhost=False, beds=None, max_guests=None):
     listing = Listing(
         airbnb_id=airbnb_id, city_slug="lisboa", district_slug=None,
         lat=lat, lng=lng, property_type="Apartment",
-        bedrooms=1, size_class=size_class, title=f"L{airbnb_id}",
+        bedrooms=bedrooms_field, beds=beds, max_guests=max_guests,
+        size_class=size_class, title=f"L{airbnb_id}",
         url=f"https://x/{airbnb_id}",
+        amenities=list(amenities or []),
+        is_superhost=is_superhost,
     )
     db_session.add(listing)
     db_session.flush()
@@ -291,6 +355,32 @@ def test_compute_segment_matrix_filters_by_radius_and_run(db_session):
     assert matrix.listing_count == 3        # nur die nahen, nicht FAR/OTHER
     assert matrix.crawl_run_id == run.id
     assert matrix.radius_km == 2.0
+
+
+def test_compute_segment_matrix_populates_listing_row_detail_fields(db_session):
+    """compute_segment_matrix soll amenities/bedrooms/beds/max_guests/is_superhost
+    aus Listing in ListingRow übernehmen — Voraussetzung für TopPerformerProfile."""
+    cfg, run = _seed_run(db_session)
+    cfg.classification_config = {"min_sample": 1}
+    db_session.flush()
+    # Zwei Listings (sonst Kohorte zu klein für price_percentile -> unclassified)
+    _seed(db_session, size_class="1BR", price=100, reviews=10, airbnb_id="X1",
+          run=run, amenities=["Wifi", "River view"], bedrooms_field=1, beds=2,
+          max_guests=3, is_superhost=True)
+    _seed(db_session, size_class="1BR", price=200, reviews=20, airbnb_id="X2",
+          run=run, amenities=["Wifi"], bedrooms_field=2, beds=3,
+          max_guests=4, is_superhost=True)
+    matrix = compute_segment_matrix(db_session, cfg, 2.0, run)
+    assert matrix.top_performer_profile is not None
+    profile = matrix.top_performer_profile
+    assert profile.count == 2
+    assert profile.superhost_share == 1.0
+    # Wifi auf beiden → 100% → erscheint immer
+    assert "Wifi" in dict(profile.common_amenities)
+    # Median-Felder gesetzt (nicht None)
+    assert profile.median_bedrooms is not None
+    assert profile.median_beds is not None
+    assert profile.median_max_guests is not None
 
 
 def test_compute_segment_matrix_respects_search_config_classification_config(db_session):
