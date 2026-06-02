@@ -88,8 +88,8 @@
             {% set profile = matrix.top_performer_profile %}
             {% if profile and profile.count > 0 %}
               <p>
-                <strong>Profil der Top-Performer.</strong>
-                Typisch:
+                <strong>Profil im empfohlenen Segment.</strong>
+                Über die {{ profile.count }} Listings dieser Klasse:
                 {% if profile.median_bedrooms is not none %}
                   {{ profile.median_bedrooms }} {% if profile.median_bedrooms == 1 %}Schlafzimmer{% else %}Schlafzimmer{% endif %}{% if profile.median_beds is not none %}, {{ profile.median_beds }} {% if profile.median_beds == 1 %}Bett{% else %}Betten{% endif %}{% endif %}{% if profile.median_max_guests is not none %}, bis zu {{ profile.median_max_guests }} Gäste{% endif %}.
                 {% endif %}

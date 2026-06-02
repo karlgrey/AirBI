@@ -323,14 +323,15 @@ def test_brief_contains_methodology_with_proxy_disclaimer(client, db_session):
     assert "% der Gäste bewerten" in body
 
 
-def test_brief_contains_top_performer_profile(client, db_session):
-    """Mit Top-Performern + Detail-Daten enthält der Brief 'Profil der
-    Top-Performer' samt mindestens einer Amenity mit Prozentanteil sowie
-    Superhost-Quote in Prozent."""
+def test_brief_contains_recommended_segment_profile(client, db_session):
+    """Mit Best-Cell + Detail-Daten enthält der Brief 'Profil im empfohlenen
+    Segment' samt mindestens einer Amenity und Superhost-Quote in Prozent.
+    Das Profil ist auf die Listings des Best-Cells beschränkt — konsistent
+    zur Hero-Empfehlung."""
     cfg = _seed_winner_config(db_session)  # 2 Listings, beide Superhost, Wifi etc.
     body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
-    assert "Profil der Top-Performer" in body
-    assert "Wifi" in body  # eine der seeded amenities
+    assert "Profil im empfohlenen Segment" in body
+    assert "Wifi" in body
     # Superhost-Quote als Prozent (beide Superhost → 100 %)
     assert "100 %" in body or "100%" in body
 

@@ -159,21 +159,19 @@ def _build_recommendation(matrix: SegmentMatrix) -> str:
 
 
 def _compute_top_performer_profile(
-    top_performers: list[TopPerformer],
     rows: list[ListingRow],
     config: dict,
 ) -> TopPerformerProfile | None:
-    """Aggregiert gemeinsame Merkmale der ausgewählten Top-Performer
-    (Räume-Median, Superhost-Quote, Preis-Spanne, häufigste Amenities).
+    """Aggregiert gemeinsame Merkmale der gegebenen Listings — Räume-Median,
+    Superhost-Quote, Preis-Spanne, häufigste Amenities.
 
-    Rückgabe: None wenn keine Top-Performer oder keine zugehörigen Rows.
+    Wird vom Builder mit den Listings des empfohlenen Best-Cells aufgerufen
+    (damit das Profil konsistent zur Hero-Empfehlung ist). Bei leerer Eingabe
+    Rückgabe ``None``.
     """
-    if not top_performers:
+    if not rows:
         return None
-    rows_by_id = {r.airbnb_id: r for r in rows}
-    tp_rows = [rows_by_id[tp.airbnb_id] for tp in top_performers if tp.airbnb_id in rows_by_id]
-    if not tp_rows:
-        return None
+    tp_rows = rows
 
     n = len(tp_rows)
     superhost_count = sum(1 for r in tp_rows if r.is_superhost)
@@ -318,9 +316,11 @@ def build_segment_matrix(
     matrix.top_performers = _pick_top_performers(
         cell_rows, int(cfg["top_performers_per_segment"])
     )
-    matrix.top_performer_profile = _compute_top_performer_profile(
-        matrix.top_performers, rows, cfg
-    )
+    # Profil aggregiert über die Listings IM EMPFOHLENEN SEGMENT (Best-Cell) —
+    # damit das Profil konsistent zur Hero-Empfehlung ist. Cross-size Top-N
+    # bleiben für die Top-Apartments-Liste reserviert (matrix.top_performers).
+    best_cell_rows = cell_rows.get(matrix.best_cell, []) if matrix.best_cell else []
+    matrix.top_performer_profile = _compute_top_performer_profile(best_cell_rows, cfg)
     return matrix
 
 
