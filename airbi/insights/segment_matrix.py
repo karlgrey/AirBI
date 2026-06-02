@@ -32,6 +32,7 @@ DEFAULT_INSIGHT_CONFIG: dict = {
     "top_performers_per_segment": 2,
     "amenity_share_threshold": 0.5,   # Anteil-Schwelle für "common amenities".
     "common_amenities_max": 6,         # Max Items in TopPerformerProfile.common_amenities.
+    "underserved_max": 3,              # Max Einträge in der Unterversorgungs-Sicht.
 }
 
 
@@ -82,6 +83,19 @@ class TopPerformer:
 
 
 @dataclass
+class UnderservedSegment:
+    """Eine 'Chancen-Zelle' aus der Matrix: hohe Nachfrage je Wettbewerber
+    (Brief §8.2). Wird in der Ranking-Liste unter dem Brief gezeigt."""
+
+    size_class: str
+    luxury_class: str
+    n: int
+    adr: "Decimal | None"
+    score: float
+    is_thin: bool
+
+
+@dataclass
 class TopPerformerProfile:
     """Aggregierte Merkmale der ausgewählten Top-Performer einer Matrix —
     'was zeichnet sie aus' (Briefing §8.3)."""
@@ -112,6 +126,7 @@ class SegmentMatrix:
     recommendation: str = ""
     top_performers: list[TopPerformer] = field(default_factory=list)
     top_performer_profile: TopPerformerProfile | None = None
+    underserved: list[UnderservedSegment] = field(default_factory=list)
     listing_count: int = 0
     review_rate: float = DEFAULT_INSIGHT_CONFIG["review_rate"]
     min_sample: int = DEFAULT_INSIGHT_CONFIG["min_sample"]
@@ -203,6 +218,36 @@ def _compute_top_performer_profile(
         median_max_guests=int(median(guests)) if guests else None,
         common_amenities=common,
     )
+
+
+def _rank_underserved_segments(
+    cells: dict,
+    best_cell: tuple | None,
+    max_count: int,
+) -> list[UnderservedSegment]:
+    """Rangiert alle Cells mit Score absteigend nach Bew./Apt (= Nachfrage je
+    Wettbewerber), exkludiert die Best-Cell und gibt die Top ``max_count``
+    zurück. Thin-Zellen sind eingeschlossen (Briefing §8.2: 'Hebt die
+    Segmente hervor, in denen Nachfrage und Angebot am stärksten auseinander-
+    laufen' — gerade dünn besetzte Cells können stark unterversorgt sein).
+    Ihre ``is_thin``-Markierung steuert in der UI das Spekulativ-Label.
+    """
+    eligible = [
+        (key, cell) for key, cell in cells.items()
+        if cell.score is not None and key != best_cell
+    ]
+    eligible.sort(key=lambda kv: (-kv[1].score, kv[0][0], kv[0][1]))
+    return [
+        UnderservedSegment(
+            size_class=key[0],
+            luxury_class=key[1],
+            n=cell.n,
+            adr=cell.adr,
+            score=cell.score,
+            is_thin=cell.is_thin,
+        )
+        for key, cell in eligible[:max_count]
+    ]
 
 
 def _pick_top_performers(
@@ -321,6 +366,10 @@ def build_segment_matrix(
     # bleiben für die Top-Apartments-Liste reserviert (matrix.top_performers).
     best_cell_rows = cell_rows.get(matrix.best_cell, []) if matrix.best_cell else []
     matrix.top_performer_profile = _compute_top_performer_profile(best_cell_rows, cfg)
+    # Unterversorgungs-Sicht: weitere Chancen-Segmente neben der Best-Cell.
+    matrix.underserved = _rank_underserved_segments(
+        cells, matrix.best_cell, int(cfg.get("underserved_max", 3))
+    )
     return matrix
 
 

@@ -343,6 +343,47 @@ def test_dashboard_has_no_onboarding_box(client, db_session):
     assert "So liest du dieses Dashboard" not in body
 
 
+def test_underserved_section_renders_with_other_chance_cells(client, db_session):
+    """Unterversorgungs-Sicht: 'Andere Chancen-Segmente' rendert mit
+    Mini-Cards, sobald es Cells außer der Best-Cell mit Score gibt."""
+    cfg = _seed_winner_config(db_session)  # 2 1BR-Listings (Budget + Mid)
+    body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
+    assert "Andere Chancen-Segmente" in body
+    # Mini-Card-Untertitel-Marker (Bew./Apt im KPI-Strip der Cards)
+    assert "Bew./Apt" in body
+
+
+def test_underserved_section_absent_when_no_other_cells(client, db_session):
+    """Wenn nur die Best-Cell Score hat (z.B. nur ein Listing-Cluster),
+    bleibt die Chancen-Section weg."""
+    from decimal import Decimal
+    from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
+    cfg = SearchConfig(
+        name="OneCell", center_lat=38.7391, center_lng=-9.1048,
+        center_label="R. Cap. Leitão 86",
+        classification_config={"min_sample": 1, "underserved_max": 3},
+    )
+    run = CrawlRun(search_config=cfg, status="completed", listings_seen=2)
+    db_session.add(run); db_session.flush()
+    # Zwei Listings im exakt selben Cell → nur eine Cell hat Score,
+    # die ist die Best-Cell → underserved leer.
+    for i in range(2):
+        listing = Listing(
+            airbnb_id=f"S{i}", city_slug="lisboa", district_slug=None,
+            lat=38.7395, lng=-9.1050, property_type="Apartment",
+            bedrooms=1, beds=2, max_guests=3,
+            size_class="1BR", title=f"L{i}", url=f"https://x/S{i}",
+        )
+        db_session.add(listing); db_session.flush()
+        db_session.add(Snapshot(
+            listing_id=listing.id, crawl_run_id=run.id,
+            price=Decimal("100"), review_count=50, rating=4.7,
+        ))
+    db_session.flush()
+    body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
+    assert "Andere Chancen-Segmente" not in body
+
+
 def test_dashboard_has_no_old_empfehlungs_block(client, db_session):
     """Der alte 'Empfehlung — am attraktivsten/noch nicht möglich'-Block am
     Ende ist entfallen (Hero ersetzt ihn vollständig)."""

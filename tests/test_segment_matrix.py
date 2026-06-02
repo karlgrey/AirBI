@@ -9,6 +9,7 @@ from airbi.insights.segment_matrix import (
     SegmentMatrix,
     TopPerformer,
     TopPerformerProfile,
+    UnderservedSegment,
     build_segment_matrix,
     compute_segment_matrix,
     latest_completed_run,
@@ -281,6 +282,73 @@ def test_top_performer_profile_is_none_when_no_top_performers():
         [], config={}, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
     )
     assert matrix.top_performer_profile is None
+
+
+def test_underserved_excludes_best_cell_and_sorts_by_score(db_session=None):
+    """Unterversorgungs-Sicht rangiert Cells nach Bew./Apt desc, lässt die
+    Best-Cell weg (steht im Hero), inkludiert thin-Cells mit Markierung."""
+    # 3x 1BR-Budget (Reviews 30 je) — Best-Cell (Score 30, n=3, nicht-thin)
+    # 3x Studio-Budget (Reviews 100 je) — würde besser scoren, wenn nicht
+    #     thin: setzen wir auf nicht-thin durch min_sample=1.
+    # Mit min_sample=1 sind alle Cells eligible. Score-Reihenfolge:
+    #   Studio-Budget=100 > 1BR-Budget=30 > ... → Best=Studio-Budget,
+    #   underserved Top=1BR-Budget.
+    rows = (
+        [_row(f"o{i}", "1BR", 50, 30) for i in range(3)]
+        + [_row(f"s{i}", "Studio", 50, 100) for i in range(3)]
+    )
+    matrix = build_segment_matrix(
+        rows, config={"min_sample": 1, "underserved_max": 3},
+        radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    assert matrix.best_cell == ("Studio", "Budget")
+    # Best-Cell ist NICHT in der underserved-Liste
+    assert all((u.size_class, u.luxury_class) != matrix.best_cell
+               for u in matrix.underserved)
+    # An erster Stelle: 1BR-Budget (zweithöchster Score 30)
+    assert matrix.underserved[0].size_class == "1BR"
+    assert matrix.underserved[0].luxury_class == "Budget"
+    assert matrix.underserved[0].score == 30.0
+    # Absteigend sortiert
+    scores = [u.score for u in matrix.underserved]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_underserved_respects_max_count_and_marks_thin():
+    """Max-Count wird respektiert; dünn besetzte Cells erscheinen mit
+    is_thin=True (UI rendert Spekulativ-Label)."""
+    # Mehr Cells als max_count, einige davon thin.
+    rows = (
+        # 3x 1BR-Budget (nicht thin, Score 50)
+        [_row(f"a{i}", "1BR", 50, 50) for i in range(3)]
+        # 1x 1BR-Mid (thin, Score 100)
+        + [_row("b", "1BR", 250, 100)]
+        # 1x 2BR-Mid (thin, Score 80)
+        + [_row("c", "2BR", 250, 80)]
+        # 1x 2BR-Budget (thin, Score 70)
+        + [_row("d", "2BR", 50, 70)]
+    )
+    matrix = build_segment_matrix(
+        rows, config={"min_sample": 3, "underserved_max": 2},
+        radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    # Best-Cell ist 1BR-Budget (n=3, nicht thin, score=50).
+    assert matrix.best_cell == ("1BR", "Budget")
+    # max_count=2 → genau 2 Einträge.
+    assert len(matrix.underserved) == 2
+    # Top-Score-thin-Cells: 1BR-Mid (100), 2BR-Mid (80).
+    assert matrix.underserved[0].score == 100.0
+    assert matrix.underserved[0].is_thin is True
+    assert matrix.underserved[1].score == 80.0
+    assert matrix.underserved[1].is_thin is True
+
+
+def test_underserved_is_empty_when_no_cell_has_score():
+    """Ohne Listings sind alle Cells leer → keine Chancen-Segmente."""
+    matrix = build_segment_matrix(
+        [], config={}, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    assert matrix.underserved == []
 
 
 def test_builder_profile_is_scoped_to_best_cell_not_cross_size():

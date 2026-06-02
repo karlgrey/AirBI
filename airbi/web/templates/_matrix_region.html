@@ -114,6 +114,51 @@
         </div>
       </details>
 
+      {# ============ ANDERE CHANCEN-SEGMENTE (Brief §8.2) ============ #}
+      {% if matrix.underserved %}
+        <section class="mb-6">
+          <header class="mb-2">
+            <h3 class="text-sm font-semibold text-slate-900">Andere Chancen-Segmente</h3>
+            <p class="text-[11px] text-slate-500">
+              Rangiert nach Bew./Apt — die Empfehlung im Hero wird übersprungen.
+            </p>
+          </header>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {% for seg in matrix.underserved %}
+              <div class="rounded-lg border border-slate-200 bg-white p-3 {% if seg.is_thin %}opacity-75{% endif %}">
+                <div class="flex items-baseline justify-between gap-2 mb-2">
+                  <div class="text-sm font-semibold text-slate-900">
+                    {% if seg.size_class == "Studio" %}Studio
+                    {% elif seg.size_class == "1BR" %}1 SZ
+                    {% elif seg.size_class == "2BR" %}2 SZ
+                    {% elif seg.size_class == "3BR+" %}3+ SZ
+                    {% else %}{{ seg.size_class }}{% endif %}
+                    · {{ seg.luxury_class }}
+                  </div>
+                  {% if seg.is_thin %}
+                    <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-500">Stichprobe klein</span>
+                  {% endif %}
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <div class="text-base font-semibold text-slate-900">{{ seg.n }}</div>
+                    <div class="text-[9px] uppercase tracking-wide text-slate-400">Wettb.</div>
+                  </div>
+                  <div>
+                    <div class="text-base font-semibold text-slate-900">{% if seg.adr %}€{{ seg.adr|int }}{% else %}–{% endif %}</div>
+                    <div class="text-[9px] uppercase tracking-wide text-slate-400">€/Nacht</div>
+                  </div>
+                  <div>
+                    <div class="text-base font-semibold text-slate-900">{{ seg.score|round(0)|int }}</div>
+                    <div class="text-[9px] uppercase tracking-wide text-slate-400">Bew./Apt</div>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
       {# ============ MARKTÜBERSICHT (sekundär) ============ #}
       <section class="mb-6">
         <header class="flex items-baseline justify-between mb-2">
