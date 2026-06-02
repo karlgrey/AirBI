@@ -528,6 +528,27 @@ def test_compute_segment_matrix_populates_listing_row_detail_fields(db_session):
     assert profile.median_bedrooms == 1
 
 
+def test_compute_segment_matrix_exposes_luxury_price_threshold(db_session):
+    """Die Luxury-Preis-Schwelle (75. Perzentil der Aktiv-Radius-Kohorte)
+    wird auf der Matrix gesetzt — Brief macht sie für den Nutzer sichtbar,
+    damit die Verschiebung zwischen Radien erklärbar bleibt."""
+    from airbi.db.models import SearchConfig
+    cfg = SearchConfig(
+        name="ThresholdCfg",
+        center_lat=38.7382, center_lng=-9.1055, center_label="X",
+        classification_config={"min_sample": 1},
+    )
+    run = CrawlRun(search_config=cfg, status="completed")
+    db_session.add(run)
+    db_session.flush()
+    # 4 Listings mit Preisen 50, 100, 150, 250 -> 75. Perz. (idx=3) = 250
+    for i, p in enumerate([50, 100, 150, 250]):
+        _seed(db_session, size_class="1BR", price=p, reviews=10,
+              airbnb_id=f"T{i}", run=run, lat=38.7385, lng=-9.1057)
+    matrix = compute_segment_matrix(db_session, cfg, 2.0, run)
+    assert matrix.luxury_price_threshold == 250
+
+
 def test_compute_segment_matrix_populates_map_listings_with_max_radius_pool(db_session):
     """map_listings enthält alle Listings im max(band_radii_km)-Umkreis, auch
     außerhalb des aktiven Radius. is_best wird nur für Listings innerhalb des

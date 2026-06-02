@@ -110,6 +110,10 @@
             <strong>Methodik.</strong>
             Nachfrage wird aus dem Bewertungs-Volumen abgeleitet (Annahme: ~{{ rate_pct }} % der Gäste bewerten). Das ist ein <em>Indikator</em>, keine gemessene Auslastung.
             Die Luxusklasse ist ein gewichteter Index aus Preis-Perzentil (Umkreis-Kohorte) und Amenity-Score.
+            {% if matrix.luxury_price_threshold %}
+              <br>
+              <strong>Aktuelle Preis-Schwelle Richtung Luxury</strong> im {{ radius_int }}-km-Umkreis: ab <strong>€{{ matrix.luxury_price_threshold|int }} / Nacht</strong> (Top 25 % der Preise). Mit größerem Umkreis verschiebt sich diese Schwelle — andere Bezirke bringen andere Preisniveaus mit; deshalb können dieselben Listings je nach Radius in einer anderen Luxusklasse landen.
+            {% endif %}
           </p>
         </div>
       </details>

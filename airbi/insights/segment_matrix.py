@@ -156,6 +156,7 @@ class SegmentMatrix:
     underserved: list[UnderservedSegment] = field(default_factory=list)
     map_listings: list[MapListing] = field(default_factory=list)
     map_data: dict = field(default_factory=dict)   # JSON-fertig fürs Template
+    luxury_price_threshold: float | None = None    # €/Nacht ab dem Top-Quartil
     listing_count: int = 0
     review_rate: float = DEFAULT_INSIGHT_CONFIG["review_rate"]
     min_sample: int = DEFAULT_INSIGHT_CONFIG["min_sample"]
@@ -510,6 +511,18 @@ def compute_segment_matrix(
         center_label=search_config.center_label,
         crawl_run_id=crawl_run.id,
     )
+
+    # Preis-Schwelle ans Top-Quartil (default 75. Perzentil) der Aktiv-Radius-
+    # Kohorte berechnen — macht im Brief sichtbar, warum sich die Luxusklasse-
+    # Zellen je nach Umkreis verschieben.
+    luxury_pct = float(
+        ((search_config.classification_config or {}).get("luxury_thresholds")
+         or [0.25, 0.5, 0.75])[-1]
+    )
+    sorted_prices = sorted(float(r.price) for r in rows if r.price is not None)
+    if sorted_prices:
+        idx = min(int(luxury_pct * len(sorted_prices)), len(sorted_prices) - 1)
+        matrix.luxury_price_threshold = sorted_prices[idx]
 
     # Map-Listings nachträglich aus dem Max-Radius-Pool bauen — luxury_class
     # gegen die Aktiv-Radius-Kohorte, is_best nur für Mitglieder im aktiven Radius.
