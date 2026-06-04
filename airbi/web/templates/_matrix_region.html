@@ -218,8 +218,63 @@
                     <div class="text-[9px] uppercase tracking-wide text-slate-400 leading-tight">Ø Bewertungen je Apartment</div>
                   </div>
                 </div>
+                {# Vergleich zur Empfehlung — relative Deltas #}
+                {% if seg.vs_best_n is not none or seg.vs_best_adr is not none or seg.vs_best_score is not none %}
+                  <div class="mt-2 pt-2 border-t border-slate-100">
+                    <div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">vs. Empfehlung</div>
+                    <div class="space-y-0.5 text-[11px] text-slate-700 leading-snug">
+                      {% if seg.vs_best_n is not none %}
+                        <div>
+                          <span class="font-medium {% if seg.vs_best_n < 0 %}text-emerald-700{% elif seg.vs_best_n > 0 %}text-rose-700{% endif %}">{{ "{:+.0%}".format(seg.vs_best_n) }}</span> Konkurrenz
+                        </div>
+                      {% endif %}
+                      {% if seg.vs_best_adr is not none %}
+                        <div>
+                          <span class="font-medium">{{ "{:+.0%}".format(seg.vs_best_adr) }}</span> Preisniveau
+                        </div>
+                      {% endif %}
+                      {% if seg.vs_best_score is not none %}
+                        <div>
+                          <span class="font-medium {% if seg.vs_best_score > 0 %}text-emerald-700{% elif seg.vs_best_score < 0 %}text-rose-700{% endif %}">{{ "{:+.0%}".format(seg.vs_best_score) }}</span> Nachfrage je Apartment
+                        </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                {% endif %}
+                {# Profil der Cell — was zeichnet die Listings dieses Segments aus #}
+                {% if seg.profile and seg.profile.count > 0 %}
+                  <div class="mt-2 pt-2 border-t border-slate-100">
+                    <div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Profil</div>
+                    <div class="text-[11px] text-slate-700 leading-snug">
+                      {% if seg.profile.median_bedrooms is not none %}
+                        Typisch {{ seg.profile.median_bedrooms }} Schlafzimmer{% if seg.profile.median_beds is not none %}, {{ seg.profile.median_beds }} {% if seg.profile.median_beds == 1 %}Bett{% else %}Betten{% endif %}{% endif %}{% if seg.profile.median_max_guests is not none %}, {{ seg.profile.median_max_guests }} Gäste{% endif %}.
+                      {% endif %}
+                      {% if seg.profile.superhost_share is not none %}
+                        {{ (seg.profile.superhost_share * 100)|round|int }} % Superhost.
+                      {% endif %}
+                      {% if seg.profile.common_amenities %}
+                        Häufig:
+                        {% for name, share in seg.profile.common_amenities[:3] %}<em>{{ name }}</em>{% if not loop.last %}, {% endif %}{% endfor %}.
+                      {% endif %}
+                    </div>
+                  </div>
+                {% endif %}
+                {# Konkreter Stärkster Vertreter — Beleg statt Behauptung #}
+                {% if seg.top_exemplar %}
+                  <div class="mt-2 pt-2 border-t border-slate-100">
+                    <div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Stärkster Vertreter</div>
+                    <div class="text-[11px]">
+                      {% if seg.top_exemplar.url %}
+                        <a href="{{ seg.top_exemplar.url }}" target="_blank" rel="noreferrer" class="text-slate-900 font-medium hover:underline">{{ seg.top_exemplar.title or seg.top_exemplar.airbnb_id }}</a>
+                      {% else %}
+                        <span class="text-slate-900 font-medium">{{ seg.top_exemplar.title or seg.top_exemplar.airbnb_id }}</span>
+                      {% endif %}
+                      <div class="text-slate-500">{{ seg.top_exemplar.review_count }} Bewertungen{% if seg.top_exemplar.rating %} · ★ {{ "%.2f"|format(seg.top_exemplar.rating) }}{% endif %}</div>
+                    </div>
+                  </div>
+                {% endif %}
                 {% if seg.rationale %}
-                  <p class="mt-2 pt-2 border-t border-slate-100 text-[11px] leading-snug text-slate-600">
+                  <p class="mt-2 pt-2 border-t border-slate-100 text-[11px] leading-snug text-slate-600 italic">
                     {{ seg.rationale }}
                   </p>
                 {% endif %}

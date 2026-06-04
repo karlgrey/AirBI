@@ -111,7 +111,9 @@ class MapListing:
 @dataclass
 class UnderservedSegment:
     """Eine 'Chancen-Zelle' aus der Matrix: hohe Nachfrage je Wettbewerber
-    (Brief §8.2). Wird in der Ranking-Liste unter dem Brief gezeigt."""
+    (Brief §8.2). Wird in der Ranking-Liste unter dem Brief gezeigt — mit
+    Vergleich zur Empfehlung, Profil und konkretem Top-Vertreter, damit die
+    Investment-Argumentation belastbar wird."""
 
     size_class: str
     luxury_class: str
@@ -119,7 +121,13 @@ class UnderservedSegment:
     adr: "Decimal | None"
     score: float
     is_thin: bool
-    rationale: str = ""           # Kurze Prosa-Begründung (1-2 Sätze).
+    rationale: str = ""                                # Kurze Prosa-Conclusion.
+    # NEU: Argumentations-Bausteine
+    vs_best_n: float | None = None                     # Relative Delta vs. Best-Cell (z.B. -0.68 = -68%).
+    vs_best_adr: float | None = None
+    vs_best_score: float | None = None
+    profile: "TopPerformerProfile | None" = None       # Wie best_cell-Profil, aber auf diese Cell bezogen.
+    top_exemplar: "TopPerformer | None" = None         # Stärkster konkreter Vertreter der Cell.
 
 
 @dataclass
@@ -273,23 +281,62 @@ def _underserved_rationale(n: int, score: float, adr, is_thin: bool) -> str:
 
 def _rank_underserved_segments(
     cells: dict,
+    cell_rows: dict,
     best_cell: tuple | None,
     max_count: int,
+    config: dict,
 ) -> list[UnderservedSegment]:
     """Rangiert alle Cells mit Score absteigend nach Bew./Apt (= Nachfrage je
     Wettbewerber), exkludiert die Best-Cell und gibt die Top ``max_count``
-    zurück. Thin-Zellen sind eingeschlossen (Briefing §8.2: 'Hebt die
-    Segmente hervor, in denen Nachfrage und Angebot am stärksten auseinander-
-    laufen' — gerade dünn besetzte Cells können stark unterversorgt sein).
-    Ihre ``is_thin``-Markierung steuert in der UI das Spekulativ-Label.
+    zurück, jeweils angereichert mit:
+
+    - Vergleich zur Best-Cell (relative Delta-Werte für n/adr/score)
+    - ``TopPerformerProfile`` der Cell (gleiche Aggregations-Logik wie
+      Best-Cell-Profil)
+    - Stärkster Vertreter der Cell als ``TopPerformer`` (Top nach review_count).
+
+    Thin-Cells sind eingeschlossen (Briefing §8.2); ``is_thin`` steuert in
+    der UI das Spekulativ-Label.
     """
     eligible = [
         (key, cell) for key, cell in cells.items()
         if cell.score is not None and key != best_cell
     ]
     eligible.sort(key=lambda kv: (-kv[1].score, kv[0][0], kv[0][1]))
-    return [
-        UnderservedSegment(
+
+    # Best-Cell-Referenzwerte für die relative Delta-Berechnung.
+    best_n = cells[best_cell].n if best_cell and best_cell in cells else None
+    best_adr_raw = cells[best_cell].adr if best_cell and best_cell in cells else None
+    best_adr = float(best_adr_raw) if best_adr_raw is not None else None
+    best_score = cells[best_cell].score if best_cell and best_cell in cells else None
+
+    result: list[UnderservedSegment] = []
+    for key, cell in eligible[:max_count]:
+        rows = cell_rows.get(key, [])
+        profile = _compute_top_performer_profile(rows, config)
+        top_exemplar = None
+        if rows:
+            top = sorted(
+                rows,
+                key=lambda r: (-r.review_count, -(r.rating or 0.0), r.airbnb_id),
+            )[0]
+            top_exemplar = TopPerformer(
+                airbnb_id=top.airbnb_id,
+                title=top.title,
+                url=top.url,
+                size_class=top.size_class,
+                luxury_class=key[1],
+                review_count=top.review_count,
+                rating=top.rating,
+            )
+        vs_n = (cell.n - best_n) / best_n if best_n else None
+        vs_adr = (
+            (float(cell.adr) - best_adr) / best_adr
+            if (best_adr and cell.adr is not None) else None
+        )
+        vs_score = (cell.score - best_score) / best_score if best_score else None
+
+        result.append(UnderservedSegment(
             size_class=key[0],
             luxury_class=key[1],
             n=cell.n,
@@ -297,9 +344,13 @@ def _rank_underserved_segments(
             score=cell.score,
             is_thin=cell.is_thin,
             rationale=_underserved_rationale(cell.n, cell.score, cell.adr, cell.is_thin),
-        )
-        for key, cell in eligible[:max_count]
-    ]
+            vs_best_n=vs_n,
+            vs_best_adr=vs_adr,
+            vs_best_score=vs_score,
+            profile=profile,
+            top_exemplar=top_exemplar,
+        ))
+    return result
 
 
 def _pick_top_performers(
@@ -429,7 +480,7 @@ def build_segment_matrix(
     matrix.top_performer_profile = _compute_top_performer_profile(best_cell_rows, cfg)
     # Unterversorgungs-Sicht: weitere Chancen-Segmente neben der Best-Cell.
     matrix.underserved = _rank_underserved_segments(
-        cells, matrix.best_cell, int(cfg.get("underserved_max", 3))
+        cells, cell_rows, matrix.best_cell, int(cfg.get("underserved_max", 3)), cfg
     )
     return matrix
 

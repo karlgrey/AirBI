@@ -362,6 +362,39 @@ def test_underserved_respects_max_count_and_marks_thin():
     assert matrix.underserved[1].is_thin is True
 
 
+def test_underserved_segment_enriched_with_comparison_profile_and_exemplar():
+    """Chancen-Cell wird mit Vergleich zur Best-Cell, Profil und konkretem
+    Top-Vertreter angereichert — Belastbarkeit der Investment-Aussage."""
+    # 3x 1BR-Premium als Best-Cell (Score 100), 3x Studio-Mid als Chancen-Cell (Score 50)
+    rows = (
+        [_row(f"b{i}", "1BR", 200, 100, bedrooms=1, beds=2, is_superhost=True,
+              amenities=["Wifi", "Pool"], max_guests=3) for i in range(3)]
+        + [_row(f"c{i}", "Studio", 100, 50, bedrooms=0, beds=1,
+                is_superhost=(i == 0), amenities=["Wifi"], max_guests=2)
+           for i in range(3)]
+    )
+    matrix = build_segment_matrix(
+        rows,
+        config={"min_sample": 1, "underserved_max": 3, "amenity_share_threshold": 0.5},
+        radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    assert len(matrix.underserved) >= 1
+    seg = matrix.underserved[0]
+    # vs.-Empfehlung-Deltas gesetzt (Studio hat gleichen N=3 → vs_best_n=0,
+    # niedrigerer Preis → vs_best_adr<0, niedrigerer Score → vs_best_score<0)
+    assert seg.vs_best_n == 0.0
+    assert seg.vs_best_adr is not None and seg.vs_best_adr < 0
+    assert seg.vs_best_score is not None and seg.vs_best_score < 0
+    # Profil aus den 3 Cell-Rows
+    assert seg.profile is not None
+    assert seg.profile.count == 3
+    # 1 von 3 Superhost → 33 %
+    assert abs(seg.profile.superhost_share - 1 / 3) < 0.01
+    # Stärkster Vertreter: höchste review_count im Cell (alle 50, also der erste alphabetisch)
+    assert seg.top_exemplar is not None
+    assert seg.top_exemplar.review_count == 50
+
+
 def test_underserved_rationale_solid_cell_mentions_demand_signal_and_adr():
     """Belastbare Cells erhalten 'solides Demand-Signal' + ADR im Satz."""
     rows = (
