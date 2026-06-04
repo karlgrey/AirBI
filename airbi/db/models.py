@@ -34,6 +34,10 @@ class SearchConfig(Base):
     band_radii_km: Mapped[list] = mapped_column(
         JSON, default=lambda: [1, 2, 3, 5, 10]
     )
+    # AL-Lizenz-Layer (Brief §11): Zone des Zielobjekts.
+    # Werte: 'ABSORCAO' | 'CONTENCAO' | 'CONTENCAO_ABSOLUTA' | NULL (nicht geprüft).
+    al_zone_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    al_zone_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
     property_filter: Mapped[dict] = mapped_column(JSON, default=dict)
     classification_config: Mapped[dict] = mapped_column(JSON, default=dict)
     crawl_schedule: Mapped[str | None] = mapped_column(String(80), nullable=True)

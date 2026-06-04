@@ -29,6 +29,7 @@ class ParsedListing:
     search_position: int | None
     amenities: list[str] | None = None
     description: str | None = None
+    license_number: str | None = None    # Aus Description-Regex (Brief §11 AL-Layer).
 
 
 @dataclass
@@ -41,3 +42,4 @@ class ListingDetail:
     max_guests: int | None
     amenities: list[str] | None = None
     description: str | None = None
+    license_number: str | None = None    # Aus Description-Regex (Brief §11 AL-Layer).

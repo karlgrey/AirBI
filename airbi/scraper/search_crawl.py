@@ -76,6 +76,7 @@ def merge_detail(parsed_listing: ParsedListing, detail: ListingDetail) -> Parsed
         max_guests=detail.max_guests,
         amenities=detail.amenities,
         description=detail.description,
+        license_number=detail.license_number,
     )
 
 
@@ -148,6 +149,10 @@ def persist_results(
         listing.is_superhost = pl.is_superhost
         listing.amenities = pl.amenities
         listing.description = pl.description
+        # AL-Layer: Lizenznummer aus Description-Regex.
+        if pl.license_number is not None:
+            listing.license_number = pl.license_number
+            listing.al_status = "extracted"
         listing.amenity_score = _amenity_score(
             pl.amenities,
             beds=pl.beds,
@@ -286,6 +291,10 @@ def refresh_details(
                             listing.amenities = detail.amenities
                         if detail.description:
                             listing.description = detail.description
+                        # AL-Layer
+                        if detail.license_number is not None:
+                            listing.license_number = detail.license_number
+                            listing.al_status = "extracted"
                         listing.size_class = _size_class(listing.bedrooms)
                         listing.amenity_score = _amenity_score(
                             listing.amenities,
