@@ -251,32 +251,6 @@ def _extract_amenities(payload: dict) -> list[str]:
     return out
 
 
-# Brief §11 (AL-Layer): typische Lizenz-Muster in portugiesischen Airbnb-
-# Beschreibungen. case-insensitive, alle liefern eine 3- bis 7-stellige ID.
-_AL_LICENSE_PATTERNS = (
-    re.compile(r"RNAL\s*[:.\-]?\s*(\d{3,7})\s*/?\s*AL\b", re.IGNORECASE),
-    re.compile(r"\bAL\s*n[º°o.:]\s*(\d{3,7})\b", re.IGNORECASE),
-    re.compile(r"\bAlojamento\s+Local\s*[:.\-]?\s*(\d{3,7})\b", re.IGNORECASE),
-    re.compile(r"\b(\d{4,7})\s*/\s*AL\b", re.IGNORECASE),   # generischer Fallback
-)
-
-
-def extract_al_license(text: str | None) -> str | None:
-    """Extrahiert die AL-Lizenznummer aus einem Beschreibungstext.
-
-    Probiert die typischen portugiesischen Muster der Reihe nach durch;
-    erstes Match gewinnt. Rückgabe im einheitlichen Format ``"<id>/AL"``.
-    ``None`` wenn kein Match gefunden wurde oder kein Text gegeben ist.
-    """
-    if not text:
-        return None
-    for pattern in _AL_LICENSE_PATTERNS:
-        m = pattern.search(text)
-        if m:
-            return f"{m.group(1)}/AL"
-    return None
-
-
 def _extract_description(payload: dict) -> str | None:
     """Kurzbeschreibung aus pdpPresentation.descriptions, HTML-Tags gestrippt."""
     try:
@@ -390,7 +364,6 @@ def parse_listing_detail(payload: dict) -> ListingDetail:
 
     amenities = _extract_amenities(payload)
     description = _extract_description(payload)
-    license_number = extract_al_license(description)
 
     return ListingDetail(
         bedrooms=bedrooms,
@@ -399,7 +372,6 @@ def parse_listing_detail(payload: dict) -> ListingDetail:
         max_guests=max_guests,
         amenities=amenities,
         description=description,
-        license_number=license_number,
     )
 
 

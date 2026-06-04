@@ -1,6 +1,13 @@
 # AL-Lizenz-Check (Phase 2 vorgezogen) — Design
 
-> Status: freigegeben (2026-06-04 mit Visual-Companion-Mockup)
+> **Status: PAUSIERT (2026-06-04)** — Feature wurde nach kurzem Live-Pilot
+> wieder rausgenommen, weil die offiziellen CML-Zonen-Daten ohne portu-
+> giesisch-sprachige Recherche nicht zugänglich sind und die im Listing-
+> Text sichtbaren Lizenzen nur ein schwaches Markt-Indiz (kein Rechts-
+> Indikator) sind. Schema-Migration `c3d4e5f6a7b8` (al_zone_status/label)
+> bleibt in der DB; Code-Pfad ist ausgebaut. Bei Wiederaufnahme: GeoJSON
+> von CML besorgen, Point-in-Polygon analog zu Bezirken früher.
+>
 > Briefing-Bezug: §11 ("AL-Lizenz-Layer (Portugal): Investitionsentscheidend
 > für Lissabon"). Schema-Felder `Listing.license_number` und
 > `Listing.al_status` sind bereits reserviert.

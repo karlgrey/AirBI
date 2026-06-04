@@ -17,12 +17,11 @@
     {% set rate_pct = (matrix.review_rate * 100)|round|int %}
     {% set center = matrix.center_label or "das Zielobjekt" %}
     {% set radius_int = matrix.radius_km|int %}
-    {% set al_blocked = matrix.al_zone_status == "CONTENCAO_ABSOLUTA" %}
 
     <article>
       {# ============ HERO-EMPFEHLUNG ============ #}
       {% if has_best %}
-        <section class="rounded-t-2xl bg-gradient-to-br from-slate-900 to-slate-800 px-6 py-6 sm:px-8 sm:py-7 text-white shadow-lg {% if al_blocked %}opacity-60 grayscale{% endif %}">
+        <section class="rounded-t-2xl bg-gradient-to-br from-slate-900 to-slate-800 px-6 py-6 sm:px-8 sm:py-7 text-white shadow-lg">
           <div class="text-[10px] uppercase tracking-[0.12em] text-slate-400 mb-1">
             Empfehlung
           </div>
@@ -67,7 +66,7 @@
       {% endif %}
 
       {# ============ INVESTMENT-BRIEF (ausklappbar) ============ #}
-      <details class="rounded-b-2xl border border-t-0 border-slate-200 bg-white mb-2 group {% if al_blocked %}opacity-60{% endif %}">
+      <details class="rounded-b-2xl border border-t-0 border-slate-200 bg-white mb-6 group">
         <summary class="cursor-pointer list-none flex items-center justify-between px-6 py-3 text-sm text-blue-600 font-medium hover:bg-slate-50">
           <span>📄 Investment-Brief — volle Begründung, Top-Performer-Profil und Methodik</span>
           <span class="text-base group-open:rotate-180 transition-transform">▾</span>
@@ -118,53 +117,6 @@
           </p>
         </div>
       </details>
-
-      {# ============ AL-LIZENZ-STATUS (Brief §11) ============ #}
-      {# Zwei klar getrennte Aussagen:
-         1) Zonen-Status am Zielobjekt — rechtliche Quelle (CML / manuell)
-         2) Lizenz-Dichte unter den Konkurrenten — Markt-Indiz, sekundär #}
-      {% set al_density_pct = (matrix.al_license_density * 100)|round|int if matrix.al_license_density is not none else None %}
-      {% if matrix.al_zone_status == "ABSORCAO" %}
-        <div class="mb-6 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 flex items-start gap-3">
-          <div class="shrink-0 w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold">✓</div>
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold text-emerald-900">Neue AL möglich · {{ matrix.al_zone_label or "Zona de Absorção" }}</div>
-            <div class="text-[11px] text-emerald-800/80 mt-0.5">Quelle: manuell aus CML-Verordnung (al_zone_status in SearchConfig).</div>
-          </div>
-        </div>
-      {% elif matrix.al_zone_status == "CONTENCAO" %}
-        <div class="mb-6 rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 flex items-start gap-3">
-          <div class="shrink-0 w-7 h-7 rounded-full bg-yellow-600 text-white flex items-center justify-center font-bold">!</div>
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold text-yellow-900">Neue AL eingeschränkt · {{ matrix.al_zone_label or "Zona de Contenção" }}</div>
-            <div class="text-[12px] text-yellow-800 mt-0.5">Kein freier Neuzugang ohne Quoten-/Kontingent-Prüfung der CML.</div>
-            <div class="text-[11px] text-yellow-800/80 mt-0.5">Quelle: manuell aus CML-Verordnung (al_zone_status in SearchConfig).</div>
-          </div>
-        </div>
-      {% elif matrix.al_zone_status == "CONTENCAO_ABSOLUTA" %}
-        <div class="mb-6 rounded-lg border border-red-300 bg-red-50 px-4 py-3 flex items-start gap-3">
-          <div class="shrink-0 w-7 h-7 rounded-full bg-red-600 text-white flex items-center justify-center font-bold">✕</div>
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold text-red-900">Neue AL gesperrt · {{ matrix.al_zone_label or "Zona de Contenção absoluta" }}</div>
-            <div class="text-[12px] text-red-800 mt-0.5">Kurzzeitvermietung am Zielobjekt rechtlich nicht umsetzbar — die Empfehlung oben ist deshalb ausgegraut. Pivot zu Mid-Term-Vermietung oder Akquise einer Bestandslizenz erforderlich.</div>
-            <div class="text-[11px] text-red-800/80 mt-0.5">Quelle: manuell aus CML-Verordnung (al_zone_status in SearchConfig).</div>
-          </div>
-        </div>
-      {% else %}
-        <div class="mb-6 rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 flex items-start gap-3">
-          <div class="shrink-0 w-7 h-7 rounded-full bg-slate-400 text-white flex items-center justify-center font-bold">?</div>
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold text-slate-700">AL-Status nicht geprüft</div>
-            <div class="text-[12px] text-slate-600 mt-0.5">Bitte aus dem CML-Geodados-Portal (Áreas de Contenção – Alojamento Local) ermitteln und <code>search_config.al_zone_status</code> auf <code>ABSORCAO</code>, <code>CONTENCAO</code> oder <code>CONTENCAO_ABSOLUTA</code> setzen.</div>
-          </div>
-        </div>
-      {% endif %}
-      {# Lizenz-Dichte als kleines sekundäres Indiz unter der Strip #}
-      {% if al_density_pct is not none %}
-        <p class="text-[11px] text-slate-500 -mt-4 mb-6 ml-1">
-          <strong>Marktrealität (sekundär):</strong> {{ matrix.al_license_count }} von {{ matrix.listing_count }} Konkurrenten im {{ radius_int }}-km-Umkreis zeigen eine sichtbare Lizenz im Listing-Text ({{ al_density_pct }} %). Niedrige Quote ≠ illegal — Airbnb zeigt die Lizenz oft in separaten Feldern, die wir hier nicht crawlen.
-        </p>
-      {% endif %}
 
       {# ============ MARKTÜBERSICHT (ausklappbar, Default zu) ============ #}
       <details class="rounded-lg border border-slate-200 bg-white mb-6 group">

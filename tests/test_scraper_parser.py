@@ -161,18 +161,6 @@ def test_detail_parser_tolerates_unexpected_shape():
     assert detail.max_guests is None
 
 
-def test_extract_al_license_recognizes_typical_patterns():
-    """AL-Lizenz-Regex (Brief §11) erkennt die typischen portugiesischen
-    Muster aus Airbnb-Description-Texten."""
-    from airbi.scraper.parser import extract_al_license
-    assert extract_al_license("Apartamento certificado RNAL 12345/AL.") == "12345/AL"
-    assert extract_al_license("Licenciado: AL nº 678") == "678/AL"
-    assert extract_al_license("Alojamento Local 4321") == "4321/AL"
-    assert extract_al_license("Welcome! Number 98765/AL is valid.") == "98765/AL"
-    assert extract_al_license(None) is None
-    assert extract_al_license("Just a regular description.") is None
-
-
 def test_detail_parser_reads_pdp_overview_items_string_list():
     """Aktuelles Airbnb-Schema (Stand 2026-06): ``pdpPresentation.overview.items``
     ist eine flache Liste von Strings, kein Dict mehr. Der Parser muss diese

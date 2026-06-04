@@ -165,11 +165,6 @@ class SegmentMatrix:
     map_listings: list[MapListing] = field(default_factory=list)
     map_data: dict = field(default_factory=dict)   # JSON-fertig fürs Template
     luxury_price_threshold: float | None = None    # €/Nacht ab dem Top-Quartil
-    # AL-Layer (Brief §11): rechtlicher Status am Zielobjekt + Marktdichte.
-    al_zone_status: str | None = None               # ABSORCAO / CONTENCAO / CONTENCAO_ABSOLUTA / None
-    al_zone_label: str | None = None                # frei-Text, z. B. "Zona de Absorção"
-    al_license_count: int = 0                       # absolute Anzahl lizenzierter Konkurrenten im Umkreis
-    al_license_density: float | None = None         # 0..1, None wenn keine Listings
     listing_count: int = 0
     review_rate: float = DEFAULT_INSIGHT_CONFIG["review_rate"]
     min_sample: int = DEFAULT_INSIGHT_CONFIG["min_sample"]
@@ -532,8 +527,6 @@ def compute_segment_matrix(
 
     rows: list[ListingRow] = []                              # Aktiv-Radius (Builder)
     map_pool: list[tuple[Listing, Snapshot, float]] = []     # Max-Radius (Map)
-    in_radius_total = 0                                       # für AL-Density-Nenner
-    in_radius_licensed = 0                                    # für AL-Density-Zähler
 
     if center_lat is not None and center_lng is not None:
         for listing, snap in session.execute(stmt).all():
@@ -544,9 +537,6 @@ def compute_segment_matrix(
                 continue
             map_pool.append((listing, snap, dist))
             if dist <= radius_km:
-                in_radius_total += 1
-                if listing.license_number:
-                    in_radius_licensed += 1
                 rows.append(
                     ListingRow(
                         airbnb_id=listing.airbnb_id,
@@ -622,14 +612,6 @@ def compute_segment_matrix(
             is_best=is_best,
         ))
     matrix.map_listings = map_listings
-
-    # AL-Layer (Brief §11): Zone-Status aus Config, Lizenz-Dichte im Umkreis.
-    matrix.al_zone_status = search_config.al_zone_status
-    matrix.al_zone_label = search_config.al_zone_label
-    matrix.al_license_count = in_radius_licensed
-    matrix.al_license_density = (
-        in_radius_licensed / in_radius_total if in_radius_total > 0 else None
-    )
     # JSON-fertige Repräsentation für das Template (Decimal -> float, etc.).
     matrix.map_data = {
         "center": {
