@@ -17,6 +17,7 @@
       .leaflet-tooltip.airbi-tip::before { border-top-color: rgba(15,23,42,0.92); }
       .leaflet-tooltip.radius-label { background: rgba(255,255,255,0.95); color: #1d4ed8; border: 1px solid #93c5fd; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; box-shadow: none; white-space: nowrap; }
       .leaflet-tooltip.radius-label::before { display: none; }
+      .leaflet-tooltip.radius-label-active { color: #dc2626; border-color: #fca5a5; background: rgba(254,242,242,0.98); }
     </style>
   </head>
   <body class="min-h-screen bg-slate-50 text-slate-900">
@@ -63,15 +64,30 @@
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         }).addTo(map);
 
-        (data.radii_km || []).forEach(function (r) {
+        var radii = data.radii_km || [];
+        var activeR = data.active_radius_km;
+        // Aktiven Kreis zuletzt rendern, damit er optisch obenauf liegt.
+        var ordered = radii.slice().sort(function (a, b) {
+          var aA = activeR != null && Math.abs(a - activeR) < 0.01;
+          var bA = activeR != null && Math.abs(b - activeR) < 0.01;
+          return aA - bA;
+        });
+        ordered.forEach(function (r) {
+          var isActive = activeR != null && Math.abs(r - activeR) < 0.01;
           L.circle([data.center.lat, data.center.lng], {
-            radius: r * 1000, color: '#1d4ed8', opacity: 0.45, weight: 1,
-            fillColor: '#3b82f6', fillOpacity: 0.025, interactive: false,
+            radius: r * 1000,
+            color: isActive ? '#dc2626' : '#1d4ed8',
+            opacity: isActive ? 0.8 : 0.45,
+            weight: isActive ? 2 : 1,
+            fillColor: isActive ? '#dc2626' : '#3b82f6',
+            fillOpacity: isActive ? 0.25 : 0.025,
+            interactive: false,
           }).addTo(map);
           // km-Label am Nord-Punkt jedes Kreises (~111 km pro Breitengrad)
           var labelLat = data.center.lat + (r / 111.0);
           L.tooltip({
-            permanent: true, direction: 'center', className: 'radius-label',
+            permanent: true, direction: 'center',
+            className: 'radius-label' + (isActive ? ' radius-label-active' : ''),
           }).setLatLng([labelLat, data.center.lng]).setContent(r + ' km').addTo(map);
         });
 
