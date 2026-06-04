@@ -94,16 +94,29 @@ def persist_results(
     - Sucht ein Listing nach (city_slug, airbnb_id); bei Fund → Update, sonst
       neuer Eintrag.
     - Berechnet `size_class` via Schlafzimmerzahl.
-    - Erstellt immer einen neuen Snapshot für den aktuellen CrawlRun.
+    - Erstellt einen Snapshot für den aktuellen CrawlRun — **dedupliziert**:
+      existiert bereits ein Snapshot für ``(listing, run)``, wird kein
+      neuer angelegt. Macht ``run_search_crawl`` resilient (per-Box-Commit
+      + Resume können dasselbe Listing mehrfach durchreichen ohne Duplikate).
 
     Ruft session.flush() am Ende auf; committet NICHT (der Aufrufer steuert
     die Transaktion).
     Gibt die Anzahl verarbeiteter Listings zurück.
     """
+    from sqlalchemy import select as _select  # lokaler Import vermeidet shadow
+
     from airbi.db.models import Listing, Snapshot  # lokaler Import → kein Zirkelbezug
 
     city_slug = crawl_run.search_config.city_slug
     cls_config = crawl_run.search_config.classification_config or {}
+
+    # Bulk-Set bereits gesnapshotteter listing_ids für diesen Run, damit der
+    # Dedup-Check im Loop O(1) statt O(N) DB-Queries kostet.
+    snapped_listing_ids: set[int] = set(
+        session.execute(
+            _select(Snapshot.listing_id).where(Snapshot.crawl_run_id == crawl_run.id)
+        ).scalars().all()
+    )
 
     for pl in parsed_listings:
         # Größenklasse
@@ -147,17 +160,21 @@ def persist_results(
 
         session.flush()  # sichert listing.id für die FK-Beziehung
 
-        # Neuer Snapshot
-        snap = Snapshot(
-            listing_id=listing.id,
-            crawl_run_id=crawl_run.id,
-            price=pl.price,
-            fees=pl.fees,
-            review_count=pl.review_count,
-            rating=pl.rating,
-            search_position=pl.search_position,
-        )
-        session.add(snap)
+        # Snapshot nur anlegen, wenn für dieses (listing, run) noch keiner
+        # existiert — sonst gibt's bei Re-Persist (Resume / Box-Überlapp)
+        # Duplikate.
+        if listing.id not in snapped_listing_ids:
+            snap = Snapshot(
+                listing_id=listing.id,
+                crawl_run_id=crawl_run.id,
+                price=pl.price,
+                fees=pl.fees,
+                review_count=pl.review_count,
+                rating=pl.rating,
+                search_position=pl.search_position,
+            )
+            session.add(snap)
+            snapped_listing_ids.add(listing.id)
 
     session.flush()
     return len(parsed_listings)
@@ -297,29 +314,51 @@ def run_search_crawl(
     *,
     headless: bool = True,
 ) -> "CrawlRun":
-    """Führt einen vollständigen Crawl-Lauf durch.
+    """Führt einen vollständigen Crawl-Lauf durch — **resilient**:
 
-    Erstellt einen CrawlRun, öffnet den Browser, scrapt alle Suchergebnis-
-    Seiten (paginiert via Cursor) und Detail-Seiten, persistiert die
-    Ergebnisse und setzt den Status.
-    Committet am Ende (im Gegensatz zu persist_results).
-
-    Wird erst in Task 10 live getestet.
+    - **Auto-Resume**: existiert für die SearchConfig ein laufender (status=
+      ``running``) CrawlRun, wird der fortgesetzt statt neu angelegt.
+    - **Per-Box-Commit**: nach jeder Box wird persistiert + committet.
+      Ein Abbruch verliert maximal die laufende Box, nicht den ganzen Lauf.
+    - **Snapshot-Dedup**: Listings, die in mehreren Boxen vorkommen oder
+      durch Resume erneut auftauchen, bekommen keinen Doppel-Snapshot.
+    - **Detail-Phase delegiert an :func:`refresh_details`** — bereits
+      resilient (per-Listing-Commit, Browser-Restart alle 50, Skip von
+      bereits-gedetailcrawlten Listings via ``bedrooms IS NOT NULL``).
     """
     import json
     import re as _re
     import urllib.parse
 
-    from airbi.db.models import CrawlRun
+    from sqlalchemy import func as _sql_func
+    from sqlalchemy import select as _sql_select
+
+    from airbi.db.models import CrawlRun, Snapshot
     from airbi.scraper.browser import browser_context
     from airbi.scraper.pacing import DEFAULT_PAGE_DELAY, human_delay
-    from airbi.scraper.parser import parse_listing_detail, parse_search_results
+    from airbi.scraper.parser import parse_search_results
 
     _DEFERRED_STATE_TAG_ID = "data-deferred-state-0"
 
-    run = CrawlRun(search_config=search_config, status="running")
-    session.add(run)
-    session.flush()
+    # Auto-Resume: laufenden Run dieser Config aufgreifen, sonst neuen anlegen.
+    existing_run = session.execute(
+        _sql_select(CrawlRun)
+        .where(CrawlRun.search_config_id == search_config.id)
+        .where(CrawlRun.status == "running")
+        .order_by(CrawlRun.id.desc()).limit(1)
+    ).scalar_one_or_none()
+    if existing_run is not None:
+        run = existing_run
+        logger.info(
+            "Resume: setze laufenden CrawlRun %d für Config '%s' fort.",
+            run.id, search_config.name,
+        )
+    else:
+        run = CrawlRun(search_config=search_config, status="running")
+        session.add(run)
+        session.commit()  # commit sofort, damit Resume den Run sieht
+        logger.info("Neuer CrawlRun %d für Config '%s' gestartet.",
+                    run.id, search_config.name)
 
     # ------------------------------------------------------------------
     # Hilfsfunktion: eine Such-Seite laden und deren searchResults lesen.
@@ -410,17 +449,20 @@ def run_search_crawl(
                 "&search_by_map=true&zoom=14"
             )
 
-        parsed_listings: dict[str, ParsedListing] = {}
+        def _in_radius(pl: ParsedListing) -> bool:
+            if pl.lat is None or pl.lng is None:
+                return False
+            return haversine_km(center_lat, center_lng, pl.lat, pl.lng) <= max_radius
 
+        # ============================================================
+        # SEARCH-PHASE: pro Box paginieren, filtern, persistieren, commit.
+        # ============================================================
         with browser_context(headless=headless) as ctx:
             page = ctx.new_page()
 
-            # ----------------------------------------------------------
-            # Über alle konzentrischen Boxen iterieren (Strategie B).
-            # Ergebnisse werden über alle Boxen per airbnb_id dedupliziert.
-            # ----------------------------------------------------------
             for box_idx, box in enumerate(boxes, start=1):
                 base_search_url = _search_url(box)
+                parsed_in_box: dict[str, ParsedListing] = {}
 
                 first_results, page_cursors = _fetch_search_page(
                     page, base_search_url, 1
@@ -439,7 +481,7 @@ def run_search_crawl(
                 for pl in parse_search_results(
                     {"data": {"presentation": {"staysSearch": {"results": {"searchResults": first_results}}}}}
                 ):
-                    parsed_listings[pl.airbnb_id] = pl
+                    parsed_in_box[pl.airbnb_id] = pl
 
                 logger.info(
                     "Box %d (von %d): Seite 1 = %d Ergebnisse, %d Cursor",
@@ -457,62 +499,51 @@ def run_search_crawl(
                     for pl in parse_search_results(
                         {"data": {"presentation": {"staysSearch": {"results": {"searchResults": page_results}}}}}
                     ):
-                        parsed_listings[pl.airbnb_id] = pl
+                        parsed_in_box[pl.airbnb_id] = pl
 
-                human_delay(*DEFAULT_PAGE_DELAY)
-
-            # Gesamtschutz: keine einzige Box lieferte Ergebnisse.
-            if not parsed_listings:
-                run.status = "failed"
-                run.message = "Keine Suchergebnisse über alle Boxen (0 Listings)."
-                run.finished_at = datetime.now(timezone.utc)
+                # Filter pro Box: Entire-Home + Distanz (max. Radius).
+                filtered = [
+                    pl for pl in parsed_in_box.values()
+                    if is_entire_home(pl) and _in_radius(pl)
+                ]
+                # Persist + commit pro Box. Re-Persist im Resume oder
+                # Box-Überlapp ist dank Snapshot-Dedup ungefährlich.
+                persist_results(session, run, filtered)
                 session.commit()
-                return run
+                logger.info(
+                    "Box %d: %d/%d nach Filter, persistiert + committet.",
+                    box_idx, len(filtered), len(parsed_in_box),
+                )
 
-            # --- Entire-Home-Filter + Distanz-Vorfilter (max. Radius) ---
-            def _in_radius(pl: ParsedListing) -> bool:
-                if pl.lat is None or pl.lng is None:
-                    return False
-                return haversine_km(center_lat, center_lng, pl.lat, pl.lng) <= max_radius
-
-            filtered = [
-                pl for pl in parsed_listings.values()
-                if is_entire_home(pl) and _in_radius(pl)
-            ]
-            logger.info(
-                "Suchergebnisse: %d total (alle Boxen), %d nach Entire-Home- + Distanz-Filter",
-                len(parsed_listings),
-                len(filtered),
-            )
-
-            # --- Detail-Crawl ---
-            final_listings: list[ParsedListing] = []
-            total_filtered = len(filtered)
-            logger.info("Detail-Crawl beginnt: %d Listings", total_filtered)
-            for i, pl in enumerate(filtered, start=1):
-                logger.info("Detail %d/%d: airbnb_id=%s", i, total_filtered, pl.airbnb_id)
-                detail_url = f"https://www.airbnb.com/rooms/{pl.airbnb_id}"
-                try:
-                    page.goto(detail_url, timeout=30_000, wait_until="domcontentloaded")
-                    page.wait_for_timeout(4_000)
-                    blobs = page.eval_on_selector_all(
-                        "script[id^='data-deferred-state']",
-                        "els => els.map(e => e.textContent)",
-                    )
-                    if blobs:
-                        detail_payload = json.loads(blobs[0])
-                        detail = parse_listing_detail(detail_payload)
-                        pl = merge_detail(pl, detail)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Detail-Crawl für %s fehlgeschlagen: %s", pl.airbnb_id, exc)
-
-                final_listings.append(pl)
                 human_delay(*DEFAULT_PAGE_DELAY)
 
-        # --- Persistieren ---
-        count = persist_results(session, run, final_listings)
+        # Authoritative Snapshot-Anzahl für diesen Run.
+        snap_count = session.execute(
+            _sql_select(_sql_func.count()).select_from(Snapshot)
+            .where(Snapshot.crawl_run_id == run.id)
+        ).scalar_one()
+
+        if snap_count == 0:
+            run.status = "failed"
+            run.message = "Keine Suchergebnisse über alle Boxen (0 Listings)."
+            run.finished_at = datetime.now(timezone.utc)
+            session.commit()
+            return run
+
+        run.listings_seen = snap_count
+        session.commit()
+        logger.info(
+            "Search-Phase fertig: %d Listings im Run. Starte resilienten Detail-Refresh.",
+            snap_count,
+        )
+
+        # ============================================================
+        # DETAIL-PHASE: an refresh_details delegieren (per-Listing-Commit,
+        # Resume via bedrooms IS NOT NULL, Browser-Restart alle 50).
+        # ============================================================
+        refresh_details(session, search_config, headless=headless)
+
         run.status = "completed"
-        run.listings_seen = count
         run.finished_at = datetime.now(timezone.utc)
 
     except Exception as exc:  # noqa: BLE001

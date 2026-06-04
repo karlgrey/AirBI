@@ -100,6 +100,24 @@ def test_persist_results_creates_listing_snapshot_and_size_class(db_session):
     assert snap.review_count == 10
 
 
+def test_persist_results_dedupes_snapshot_per_run(db_session):
+    """Wird persist_results für DASSELBE Listing innerhalb DESSELBEN Runs
+    mehrfach aufgerufen, darf nur EIN Snapshot entstehen — Voraussetzung für
+    den per-Box-Commit + Resume-Pfad in run_search_crawl."""
+    cfg = SearchConfig(name="Dedup", district_slugs=["marvila"])
+    run = CrawlRun(search_config=cfg, status="running")
+    db_session.add(run)
+    db_session.flush()
+    pl = _parsed("D1", 38.7390, -9.1044, review_count=10)
+    persist_results(db_session, run, [pl])
+    # Zweiter Aufruf mit demselben Listing → upsert auf Listing, aber KEIN
+    # zweiter Snapshot für (listing, run).
+    persist_results(db_session, run, [pl])
+    snap_count = db_session.query(Snapshot).filter_by(crawl_run_id=run.id).count()
+    assert snap_count == 1
+    assert db_session.query(Listing).filter_by(airbnb_id="D1").count() == 1
+
+
 def test_persist_results_upserts_listing_on_second_crawl(db_session):
     cfg = SearchConfig(name="Marvila Crawl", district_slugs=["marvila"])
     run1 = CrawlRun(search_config=cfg, status="running")

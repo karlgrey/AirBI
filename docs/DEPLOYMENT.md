@@ -56,7 +56,7 @@ Der Crawl läuft **nicht** auf dem Server (braucht Residential-IP). Neue Daten k
 
 **Befehle auf dem Dev-Rechner:**
 
-- `uv run airbi crawl --config "Marvila Slice 1" --verbose` — voller Lauf (5 konzentrische Boxen + Detail-Crawl). Single-Commit am Ende: ein Hang verliert alles. Mit `PYTHONUNBUFFERED=1 caffeinate -d -i -s --` umgeben und Deckel offen lassen.
+- `uv run airbi crawl --config "Marvila Slice 1" --verbose` — voller Lauf (5 konzentrische Boxen + Detail-Crawl). **Resilient**: Auto-Resume eines `running`-CrawlRuns, per-Box-Commit in der Such-Phase, Detail-Phase delegiert an refresh-details. Ein Abbruch verliert max. eine Box + ein Detail-Listing. Mit `PYTHONUNBUFFERED=1 caffeinate -d -i -s --` umgeben empfohlen.
 - `uv run airbi refresh-details --config "Marvila Slice 1" --verbose` — **resilient**: re-crawlt nur die Detail-Seiten aller Listings des letzten completed Runs. Per-Listing-Commit, resumierbar (skipped Listings mit `bedrooms IS NOT NULL`), Browser-Neustart alle 50. Sinnvoll nach einer Parser-Änderung, ohne neue Such-Phase.
 
 **Dump/Restore-Pfad:**
