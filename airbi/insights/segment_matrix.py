@@ -109,6 +109,18 @@ class MapListing:
 
 
 @dataclass
+class Kernthese:
+    """Kompakte, scanbare Aussage über den Markt eines Radius — drei bis fünf
+    davon ergeben das 'TL;DR' fürs Stakeholder-Briefing. Generiert aus der
+    Matrix; jedes Feature ist eine Aussage über VORHANDENE Daten, nicht
+    Spekulation."""
+
+    label: str           # T1, T2, ...
+    headline: str        # fettes Kern-Statement
+    detail: str = ""     # ergänzender Beleg (Zahlen, Quelle)
+
+
+@dataclass
 class GapCandidate:
     """Ein 'weißer Fleck' in der Matrix: Cell ohne (oder kaum) Angebot, deren
     Nachbar-Cells aber starke Demand zeigen — Hinweis auf Pionier-Position
@@ -179,6 +191,7 @@ class SegmentMatrix:
     top_performer_profile: TopPerformerProfile | None = None
     underserved: list[UnderservedSegment] = field(default_factory=list)
     gap_cell: GapCandidate | None = None             # Pionier-Alternative zur Best-Cell
+    kernthesen: list[Kernthese] = field(default_factory=list)  # TL;DR für Stakeholder
     map_listings: list[MapListing] = field(default_factory=list)
     map_data: dict = field(default_factory=dict)   # JSON-fertig fürs Template
     luxury_price_threshold: float | None = None    # €/Nacht ab dem Top-Quartil
@@ -371,6 +384,84 @@ def _find_gap_cell(cells: dict, min_sample: int) -> GapCandidate | None:
             rationale=rationale,
         )
     return None
+
+
+def _build_kernthesen(matrix: "SegmentMatrix") -> list[Kernthese]:
+    """Erzeugt 3–5 scanbare Kern-Aussagen aus den bereits berechneten Matrix-
+    Feldern. Jede These ist ein Statement über VORHANDENE Zahlen, keine
+    Prognose — Stakeholder erkennt die Belegquelle sofort wieder."""
+    if not matrix.best_cell:
+        return []
+    out: list[Kernthese] = []
+    bsize, blux = matrix.best_cell
+    bcell = matrix.cells[matrix.best_cell]
+    size_label = _size_klartext(bsize)
+    radius_int = int(round(matrix.radius_km)) if matrix.radius_km else 0
+
+    # T1 — Sweet-Spot: was empfehlen wir und warum.
+    out.append(Kernthese(
+        label="T1",
+        headline=f"{size_label} im {blux}-Segment führt im Umkreis von {radius_int} km",
+        detail=(
+            f"{bcell.n} vergleichbare Apartments, Ø "
+            f"{int(round(bcell.score))} Bewertungen je Apartment — stärkstes "
+            f"verfügbares Demand-Signal."
+        ),
+    ))
+
+    # T2 — Marktpreis im empfohlenen Segment.
+    if bcell.adr:
+        out.append(Kernthese(
+            label="T2",
+            headline=f"Marktpreis liegt bei €{int(bcell.adr)}/Nacht",
+            detail="(Median im empfohlenen Segment).",
+        ))
+
+    # T3 — Erfolgs-Profil: was zeichnet die Top-Performer aus.
+    profile = matrix.top_performer_profile
+    if profile and profile.count > 0 and profile.median_bedrooms is not None:
+        sz = (
+            "Studio" if profile.median_bedrooms == 0
+            else f"{profile.median_bedrooms}-Zimmer"
+        )
+        guests = (
+            f" bis {profile.median_max_guests} Gäste"
+            if profile.median_max_guests else ""
+        )
+        beds = (
+            f", {profile.median_beds} Betten"
+            if profile.median_beds else ""
+        )
+        # Top 2 Amenities, wenn Anteil ≥ 50 % im Segment.
+        amen_part = ""
+        if profile.common_amenities:
+            picks = [name for name, share in profile.common_amenities[:2] if share >= 0.5]
+            if picks:
+                amen_part = ", oft mit " + " und ".join(picks)
+        out.append(Kernthese(
+            label="T3",
+            headline=f"Erfolgs-Profil: {sz}{beds}{guests}{amen_part}",
+            detail=f"(Median über {profile.count} Apartments im Segment).",
+        ))
+
+    # T4 — Pionier-Lücke (optional): wenn das Tool eine relevante Alternative
+    # gefunden hat, gehört sie ins TL;DR.
+    if matrix.gap_cell:
+        gap = matrix.gap_cell
+        out.append(Kernthese(
+            label=f"T{len(out) + 1}",
+            headline=(
+                f"Pionier-Lücke: {_size_klartext(gap.size_class)} im "
+                f"{gap.luxury_class}-Segment unbesetzt"
+            ),
+            detail=(
+                f"— Nachbar-Cell {gap.strongest_neighbor_label} signalisiert "
+                f"Demand ({gap.strongest_neighbor_n} Listings, Ø "
+                f"{int(round(gap.strongest_neighbor_score))} Bew./Apt)."
+            ),
+        ))
+
+    return out
 
 
 def _rank_underserved_segments(
@@ -578,6 +669,9 @@ def build_segment_matrix(
     )
     # Pionier-Alternative: weiße Flecken mit starkem Nachbar-Demand-Signal.
     matrix.gap_cell = _find_gap_cell(cells, min_sample)
+    # Kernthesen: TL;DR aus den oben berechneten Feldern, fürs Stakeholder-
+    # Briefing oben im Dashboard.
+    matrix.kernthesen = _build_kernthesen(matrix)
     return matrix
 
 

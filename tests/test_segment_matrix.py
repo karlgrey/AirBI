@@ -11,6 +11,7 @@ from airbi.insights.segment_matrix import (
     TopPerformer,
     TopPerformerProfile,
     GapCandidate,
+    Kernthese,
     UnderservedSegment,
     build_segment_matrix,
     compute_segment_matrix,
@@ -475,6 +476,72 @@ def test_gap_cell_detects_white_spot_with_strong_neighbor():
     assert gap.strongest_neighbor_n == 5
     assert "0 Wettbewerber" in gap.rationale
     assert "First-Mover" in gap.rationale
+
+
+def test_kernthesen_generated_from_best_cell_and_profile():
+    """Kernthesen-Generator füllt T1 (Sweet-Spot), T2 (Marktpreis) und T3
+    (Profil) aus den vorhandenen Matrix-Feldern. Kein Best-Cell → keine
+    Thesen (das Tool spricht nicht, wenn es nichts zu sagen hat)."""
+    cfg = {
+        "min_sample": 3,
+        "luxury_weights": {"price": 0.0, "amenity": 1.0},
+        "underserved_max": 0,
+    }
+    rows = [
+        _row(f"x{i}", "1BR", 150, 100, amenity_score=0.4,
+             bedrooms=1, beds=2, max_guests=3,
+             amenities=["River view", "Air conditioning", "Wifi"])
+        for i in range(5)
+    ]
+    matrix = build_segment_matrix(
+        rows, config=cfg, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    labels = [t.label for t in matrix.kernthesen]
+    assert "T1" in labels and "T2" in labels and "T3" in labels
+    # T1 nennt Größe + Luxus-Segment + Radius
+    t1 = next(t for t in matrix.kernthesen if t.label == "T1")
+    assert "1 Schlafzimmer" in t1.headline
+    assert "Mid" in t1.headline
+    assert "2 km" in t1.headline
+    # T2 nennt den Median-Preis
+    t2 = next(t for t in matrix.kernthesen if t.label == "T2")
+    assert "€150" in t2.headline
+    # T3 nennt das Profil aus dem Top-Performer-Aggregat
+    t3 = next(t for t in matrix.kernthesen if t.label == "T3")
+    assert "1-Zimmer" in t3.headline or "Studio" in t3.headline
+
+
+def test_kernthesen_include_gap_when_pioneer_alternative_exists():
+    """Wenn der Lücken-Finder eine Pionier-Alternative meldet, wird sie als
+    Tn (nach den Mainstream-Thesen) ins TL;DR aufgenommen."""
+    cfg = {
+        "min_sample": 3,
+        "luxury_weights": {"price": 0.0, "amenity": 1.0},
+        "underserved_max": 0,
+    }
+    rows = (
+        # Best-Cell: 1BR Luxury, n=5, Score 200
+        [_row(f"a{i}", "1BR", 200, 200, amenity_score=0.9,
+              bedrooms=1, beds=2, max_guests=3) for i in range(5)]
+        # Studio Luxury → Gap-Kandidat (n=0, Nachbar 1BR Luxury stark)
+    )
+    matrix = build_segment_matrix(
+        rows, config=cfg, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    # Gap muss erkannt sein, sonst greift der Test nicht.
+    assert matrix.gap_cell is not None
+    gap_thesen = [t for t in matrix.kernthesen if "Pionier" in t.headline]
+    assert len(gap_thesen) == 1
+    assert "Studio" in gap_thesen[0].headline
+    assert "Luxury" in gap_thesen[0].headline
+
+
+def test_kernthesen_empty_when_no_best_cell():
+    """Ohne Datenbasis (Best-Cell) gibt es keine Kernthesen — kein Rauschen."""
+    matrix = build_segment_matrix(
+        [], config={}, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    assert matrix.kernthesen == []
 
 
 def test_gap_cell_none_when_no_listings():

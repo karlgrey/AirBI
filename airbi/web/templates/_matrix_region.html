@@ -22,11 +22,31 @@
       {# show_gap = es gibt sowohl eine Mainstream-Empfehlung als auch eine
          qualifizierte Pionier-Alternative — nur dann das A/B-Framing zeigen. #}
       {% set show_gap = has_best and matrix.gap_cell %}
+
+      {# ============ KERNTHESEN (TL;DR über dem Hero) ============ #}
+      {% if matrix.kernthesen %}
+        <section class="rounded-2xl border border-slate-200 bg-white px-6 py-5 mb-3 shadow-sm">
+          <div class="text-[10px] uppercase tracking-[0.12em] text-slate-500 mb-3">
+            Kernthesen — Umkreis {{ radius_int }} km
+          </div>
+          <ul class="space-y-2.5">
+            {% for t in matrix.kernthesen %}
+              <li class="flex gap-3 text-[13px] leading-relaxed">
+                <span class="shrink-0 w-8 h-6 rounded bg-slate-900 text-white text-[10px] font-bold flex items-center justify-center">{{ t.label }}</span>
+                <div class="flex-1 min-w-0">
+                  <span class="font-semibold text-slate-900">{{ t.headline }}</span>{% if t.detail %} <span class="text-slate-600">{{ t.detail }}</span>{% endif %}
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+
       {# ============ HERO-EMPFEHLUNG ============ #}
       {% if has_best %}
         <section class="{% if show_gap %}rounded-2xl mb-2{% else %}rounded-t-2xl{% endif %} bg-gradient-to-br from-slate-900 to-slate-800 px-6 py-6 sm:px-8 sm:py-7 text-white shadow-lg">
           <div class="text-[10px] uppercase tracking-[0.12em] text-slate-400 mb-1">
-            {% if show_gap %}Spielzug A · Mainstream-Empfehlung{% else %}Empfehlung{% endif %}
+            {% if show_gap %}A · Mainstream-Empfehlung{% else %}Empfehlung{% endif %}
           </div>
           <h2 class="text-2xl sm:text-3xl font-semibold leading-tight">
             {% if bsize == "Studio" %}Studio
@@ -75,7 +95,7 @@
           <div class="shrink-0 w-7 h-7 rounded-full bg-amber-600 text-white flex items-center justify-center text-xs font-bold">B</div>
           <div class="flex-1 min-w-0">
             <div class="text-[10px] uppercase tracking-[0.12em] text-amber-700 mb-0.5">
-              Spielzug B · Pionier-Alternative
+              B · Pionier-Alternative
             </div>
             <div class="text-sm font-semibold text-amber-900">
               {% if gap.size_class == "Studio" %}Studio
