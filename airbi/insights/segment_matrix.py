@@ -386,6 +386,28 @@ def _find_gap_cell(cells: dict, min_sample: int) -> GapCandidate | None:
     return None
 
 
+# Amenities, die in fast jedem Listing vorkommen und für die T3-Profil-These
+# keine Aussagekraft haben — Stakeholder hört „Bed linens und Carbon monoxide
+# alarm" und lernt nichts. Filtern, damit T3 differenzierende Merkmale nennt
+# (Flussblick, Klima, Pool, Workspace etc.).
+_GENERIC_AMENITY_TOKENS: tuple[str, ...] = (
+    "bed linen", "linens", "towels", "hangers", "iron",
+    "essentials", "soap", "shampoo", "conditioner", "body wash",
+    "hot water", "heating", "smoke alarm", "carbon monoxide",
+    "fire extinguisher", "first aid", "long term stays",
+    "self check-in", "self check in", "lockbox",
+    "private entrance",  # zu generisch in Lissabon
+    "dishes and silverware", "cooking basics", "kitchen", "refrigerator",
+)
+
+
+def _is_distinctive_amenity(name: str) -> bool:
+    """True, wenn die Amenity in T3 als Profil-Merkmal taugt — schließt
+    generische Hygiene-/Sicherheits-Items aus."""
+    n = name.lower()
+    return not any(tok in n for tok in _GENERIC_AMENITY_TOKENS)
+
+
 def _build_kernthesen(matrix: "SegmentMatrix") -> list[Kernthese]:
     """Erzeugt 3–5 scanbare Kern-Aussagen aus den bereits berechneten Matrix-
     Feldern. Jede These ist ein Statement über VORHANDENE Zahlen, keine
@@ -432,10 +454,15 @@ def _build_kernthesen(matrix: "SegmentMatrix") -> list[Kernthese]:
             f", {profile.median_beds} Betten"
             if profile.median_beds else ""
         )
-        # Top 2 Amenities, wenn Anteil ≥ 50 % im Segment.
+        # Top 2 differenzierende Amenities, wenn Anteil ≥ 50 % im Segment —
+        # generische Hygiene-/Sicherheits-Items (Bed linens, Carbon monoxide)
+        # vorher ausfiltern, sonst hat T3 keinen Informationswert.
         amen_part = ""
         if profile.common_amenities:
-            picks = [name for name, share in profile.common_amenities[:2] if share >= 0.5]
+            picks = [
+                name for name, share in profile.common_amenities
+                if share >= 0.5 and _is_distinctive_amenity(name)
+            ][:2]
             if picks:
                 amen_part = ", oft mit " + " und ".join(picks)
         out.append(Kernthese(
