@@ -10,6 +10,7 @@ from airbi.insights.segment_matrix import (
     SegmentMatrix,
     TopPerformer,
     TopPerformerProfile,
+    GapCandidate,
     UnderservedSegment,
     build_segment_matrix,
     compute_segment_matrix,
@@ -435,6 +436,53 @@ def test_underserved_is_empty_when_no_cell_has_score():
         [], config={}, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
     )
     assert matrix.underserved == []
+
+
+def test_gap_cell_detects_white_spot_with_strong_neighbor():
+    """Pionier-Alternative: leere Cell, deren direkter Matrix-Nachbar starke
+    Demand zeigt — Adjazenz-Demand-Score > Median qualifiziert sie als Lücke."""
+    # luxury_weights so wählen, dass amenity_score allein die Luxusklasse
+    # bestimmt — damit der Test-Aufbau deterministisch ist.
+    cfg = {
+        "min_sample": 3,
+        "luxury_weights": {"price": 0.0, "amenity": 1.0},
+        "underserved_max": 0,  # Underserved hier irrelevant
+    }
+    # 1BR Luxury: 5 Listings, Reviews=200 → starker Nachbar.
+    # 1BR Premium: 5 Listings, Reviews=50  → eligible neighbor, geringer Score.
+    # 1BR Mid:     5 Listings, Reviews=80  → Best-Cell (Score 80, n=5, ungating).
+    # Studio Luxury: KEINE Listings → Lücken-Kandidat, Nachbarn:
+    #   - unten 1BR Luxury (Score 200)
+    #   - links Studio Premium (leer) → kein Beitrag
+    # → adj_score = 200, einziger Nachbar.
+    rows = (
+        [_row(f"a{i}", "1BR", 100, 200, amenity_score=0.9) for i in range(5)]
+        + [_row(f"b{i}", "1BR", 100, 50, amenity_score=0.6) for i in range(5)]
+        + [_row(f"c{i}", "1BR", 100, 80, amenity_score=0.4) for i in range(5)]
+    )
+    matrix = build_segment_matrix(
+        rows, config=cfg, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    assert matrix.gap_cell is not None
+    gap = matrix.gap_cell
+    # Studio Luxury hat 1BR Luxury als stärksten Nachbarn.
+    assert gap.size_class == "Studio"
+    assert gap.luxury_class == "Luxury"
+    assert gap.n == 0
+    assert gap.adjacency_score == 200.0
+    assert "1 Schlafzimmer" in gap.strongest_neighbor_label
+    assert "Luxury" in gap.strongest_neighbor_label
+    assert gap.strongest_neighbor_n == 5
+    assert "0 Wettbewerber" in gap.rationale
+    assert "First-Mover" in gap.rationale
+
+
+def test_gap_cell_none_when_no_listings():
+    """Leere Matrix → keine Pionier-Alternative."""
+    matrix = build_segment_matrix(
+        [], config={}, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    assert matrix.gap_cell is None
 
 
 def test_builder_profile_is_scoped_to_best_cell_not_cross_size():
