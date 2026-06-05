@@ -479,9 +479,9 @@ def test_gap_cell_detects_white_spot_with_strong_neighbor():
 
 
 def test_kernthesen_generated_from_best_cell_and_profile():
-    """Kernthesen-Generator füllt T1 (Sweet-Spot), T2 (Marktpreis) und T3
-    (Profil) aus den vorhandenen Matrix-Feldern. Kein Best-Cell → keine
-    Thesen (das Tool spricht nicht, wenn es nichts zu sagen hat)."""
+    """Kernthesen-Generator füllt These 1 (stärkste Position), These 2
+    (Preisniveau) und These 3 (Profil) aus den vorhandenen Matrix-Feldern.
+    Label-Format: 'These N', kein 'T1'-Jargon."""
     cfg = {
         "min_sample": 3,
         "luxury_weights": {"price": 0.0, "amenity": 1.0},
@@ -497,18 +497,47 @@ def test_kernthesen_generated_from_best_cell_and_profile():
         rows, config=cfg, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
     )
     labels = [t.label for t in matrix.kernthesen]
-    assert "T1" in labels and "T2" in labels and "T3" in labels
-    # T1 nennt Größe + Luxus-Segment + Radius
-    t1 = next(t for t in matrix.kernthesen if t.label == "T1")
+    assert labels[:3] == ["These 1", "These 2", "These 3"]
+    # These 1 nennt Größe + Luxus-Segment + Radius
+    t1 = matrix.kernthesen[0]
     assert "1 Schlafzimmer" in t1.headline
     assert "Mid" in t1.headline
     assert "2 km" in t1.headline
-    # T2 nennt den Median-Preis
-    t2 = next(t for t in matrix.kernthesen if t.label == "T2")
-    assert "€150" in t2.headline
-    # T3 nennt das Profil aus dem Top-Performer-Aggregat
-    t3 = next(t for t in matrix.kernthesen if t.label == "T3")
-    assert "1-Zimmer" in t3.headline or "Studio" in t3.headline
+    # These 2 nennt den Median-Preis
+    t2 = matrix.kernthesen[1]
+    assert "150" in t2.headline and "€" in t2.headline
+    # These 3 nennt das Profil aus dem Top-Performer-Aggregat
+    t3 = matrix.kernthesen[2]
+    assert "1-Schlafzimmer" in t3.headline or "Studios" in t3.headline
+
+
+def test_kernthesen_have_no_internal_jargon():
+    """Stakeholder-Sprache: keine Tool-Begriffe wie 'Nachbar-Cell', 'Demand-
+    Signal', 'Pricing-Window', 'TL;DR'."""
+    cfg = {
+        "min_sample": 3,
+        "luxury_weights": {"price": 0.0, "amenity": 1.0},
+        "underserved_max": 0,
+    }
+    # Best-Cell + Gap-Kandidat — damit These 4 mitgetestet wird.
+    rows = [
+        _row(f"a{i}", "1BR", 200, 200, amenity_score=0.9,
+             bedrooms=1, beds=2, max_guests=3,
+             amenities=["River view", "Wifi"])
+        for i in range(5)
+    ]
+    matrix = build_segment_matrix(
+        rows, config=cfg, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    assert matrix.gap_cell is not None  # sonst greift These 4 nicht
+    forbidden = ("Nachbar-Cell", "Demand-Signal", "TL;DR", "Sweet-Spot",
+                 "Best-Cell", "Bew./Apt", "First-Mover", "Pricing-Window")
+    for t in matrix.kernthesen:
+        full = t.headline + " " + t.detail
+        for token in forbidden:
+            assert token not in full, (
+                f"{t.label}: enthält Jargon-Begriff '{token}' — {full}"
+            )
 
 
 def test_kernthesen_t3_skips_generic_amenities():
@@ -536,16 +565,17 @@ def test_kernthesen_t3_skips_generic_amenities():
     matrix = build_segment_matrix(
         rows, config=cfg, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
     )
-    t3 = next(t for t in matrix.kernthesen if t.label == "T3")
-    # Generische Amenities dürfen NICHT erscheinen
-    assert "Bed linens" not in t3.headline
-    assert "Carbon monoxide" not in t3.headline
-    assert "Smoke alarm" not in t3.headline
-    # Differenzierende Amenities sollen erscheinen
+    t3 = next(t for t in matrix.kernthesen if t.label == "These 3")
+    # Generische Amenities dürfen weder in Headline noch Detail erscheinen
+    full = t3.headline + " " + t3.detail
+    assert "Bed linens" not in full
+    assert "Carbon monoxide" not in full
+    assert "Smoke alarm" not in full
+    # Differenzierende Amenities sollen erscheinen (im Detail-Teil)
     has_distinctive = any(
-        a in t3.headline for a in ("Wifi", "River view", "Air conditioning")
+        a in full for a in ("Wifi", "River view", "Air conditioning")
     )
-    assert has_distinctive, f"keine differenzierende Amenity in T3: {t3.headline}"
+    assert has_distinctive, f"keine differenzierende Amenity in These 3: {full}"
 
 
 def test_kernthesen_include_gap_when_pioneer_alternative_exists():
@@ -567,7 +597,8 @@ def test_kernthesen_include_gap_when_pioneer_alternative_exists():
     )
     # Gap muss erkannt sein, sonst greift der Test nicht.
     assert matrix.gap_cell is not None
-    gap_thesen = [t for t in matrix.kernthesen if "Pionier" in t.headline]
+    gap_thesen = [t for t in matrix.kernthesen
+                  if "Marktlücke" in t.headline or "Lücke" in t.headline]
     assert len(gap_thesen) == 1
     assert "Studio" in gap_thesen[0].headline
     assert "Luxury" in gap_thesen[0].headline
