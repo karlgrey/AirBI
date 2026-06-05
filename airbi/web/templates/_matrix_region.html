@@ -19,11 +19,14 @@
     {% set radius_int = matrix.radius_km|int %}
 
     <article>
+      {# show_gap = es gibt sowohl eine Mainstream-Empfehlung als auch eine
+         qualifizierte Pionier-Alternative — nur dann das A/B-Framing zeigen. #}
+      {% set show_gap = has_best and matrix.gap_cell %}
       {# ============ HERO-EMPFEHLUNG ============ #}
       {% if has_best %}
-        <section class="rounded-t-2xl bg-gradient-to-br from-slate-900 to-slate-800 px-6 py-6 sm:px-8 sm:py-7 text-white shadow-lg">
+        <section class="{% if show_gap %}rounded-2xl mb-2{% else %}rounded-t-2xl{% endif %} bg-gradient-to-br from-slate-900 to-slate-800 px-6 py-6 sm:px-8 sm:py-7 text-white shadow-lg">
           <div class="text-[10px] uppercase tracking-[0.12em] text-slate-400 mb-1">
-            Empfehlung
+            {% if show_gap %}Spielzug A · Mainstream-Empfehlung{% else %}Empfehlung{% endif %}
           </div>
           <h2 class="text-2xl sm:text-3xl font-semibold leading-tight">
             {% if bsize == "Studio" %}Studio
@@ -65,8 +68,32 @@
         </section>
       {% endif %}
 
+      {# ============ PIONIER-STRIP (Spielzug B · weißer Fleck) ============ #}
+      {% if show_gap %}
+        {% set gap = matrix.gap_cell %}
+        <section class="rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 mb-2 flex items-start gap-3">
+          <div class="shrink-0 w-7 h-7 rounded-full bg-amber-600 text-white flex items-center justify-center text-xs font-bold">B</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-[10px] uppercase tracking-[0.12em] text-amber-700 mb-0.5">
+              Spielzug B · Pionier-Alternative
+            </div>
+            <div class="text-sm font-semibold text-amber-900">
+              {% if gap.size_class == "Studio" %}Studio
+              {% elif gap.size_class == "1BR" %}1 Schlafzimmer
+              {% elif gap.size_class == "2BR" %}2 Schlafzimmer
+              {% elif gap.size_class == "3BR+" %}3+ Schlafzimmer
+              {% else %}{{ gap.size_class }}{% endif %}
+              · {{ gap.luxury_class }}
+            </div>
+            <p class="mt-1 text-[12px] leading-relaxed text-amber-800">
+              {{ gap.rationale }}
+            </p>
+          </div>
+        </section>
+      {% endif %}
+
       {# ============ INVESTMENT-BRIEF (ausklappbar) ============ #}
-      <details class="rounded-b-2xl border border-t-0 border-slate-200 bg-white mb-6 group">
+      <details class="{% if show_gap %}rounded-2xl border{% else %}rounded-b-2xl border border-t-0{% endif %} border-slate-200 bg-white mb-6 group">
         <summary class="cursor-pointer list-none flex items-center justify-between px-6 py-3 text-sm text-blue-600 font-medium hover:bg-slate-50">
           <span>📄 Investment-Brief — volle Begründung, Top-Performer-Profil und Methodik</span>
           <span class="text-base group-open:rotate-180 transition-transform">▾</span>

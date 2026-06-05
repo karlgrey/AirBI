@@ -109,6 +109,22 @@ class MapListing:
 
 
 @dataclass
+class GapCandidate:
+    """Ein 'weißer Fleck' in der Matrix: Cell ohne (oder kaum) Angebot, deren
+    Nachbar-Cells aber starke Demand zeigen — Hinweis auf Pionier-Position
+    (statt 'join the winners' der Best-Cell-Empfehlung)."""
+
+    size_class: str
+    luxury_class: str
+    n: int                                  # eigene Cell-Anzahl (meist 0 oder dünn)
+    adjacency_score: float                  # Mittelwert der Nachbar-Scores
+    strongest_neighbor_label: str           # z.B. "1 Schlafzimmer · Luxury"
+    strongest_neighbor_n: int
+    strongest_neighbor_score: float
+    rationale: str                          # vollständige Begründung
+
+
+@dataclass
 class UnderservedSegment:
     """Eine 'Chancen-Zelle' aus der Matrix: hohe Nachfrage je Wettbewerber
     (Brief §8.2). Wird in der Ranking-Liste unter dem Brief gezeigt — mit
@@ -162,6 +178,7 @@ class SegmentMatrix:
     top_performers: list[TopPerformer] = field(default_factory=list)
     top_performer_profile: TopPerformerProfile | None = None
     underserved: list[UnderservedSegment] = field(default_factory=list)
+    gap_cell: GapCandidate | None = None             # Pionier-Alternative zur Best-Cell
     map_listings: list[MapListing] = field(default_factory=list)
     map_data: dict = field(default_factory=dict)   # JSON-fertig fürs Template
     luxury_price_threshold: float | None = None    # €/Nacht ab dem Top-Quartil
@@ -277,6 +294,83 @@ def _underserved_rationale(n: int, score: float, adr, is_thin: bool) -> str:
         f"{n_label}, je Ø {score_int} Bewertungen — solides Demand-Signal"
         f"{adr_part}."
     )
+
+
+def _size_klartext(size: str) -> str:
+    """Klartext-Größen-Label fürs UI/Rationale."""
+    return {
+        "Studio": "Studio",
+        "1BR": "1 Schlafzimmer",
+        "2BR": "2 Schlafzimmer",
+        "3BR+": "3+ Schlafzimmer",
+    }.get(size, size)
+
+
+def _find_gap_cell(cells: dict, min_sample: int) -> GapCandidate | None:
+    """Sucht den stärksten 'weißen Fleck' in der Matrix.
+
+    Eine Cell ist Gap-Kandidat, wenn ``n < min_sample`` (kein/kaum Angebot).
+    Adjazenz-Score = Mittelwert der Scores ihrer direkten Nachbarn (gleiche
+    Größe ± 1 Luxusklasse oder gleiche Luxusklasse ± 1 Größe). Ist dieser
+    über dem Median aller populierten Cell-Scores im Lauf, lohnt sich die
+    Cell als Pionier-Position.
+
+    Gibt nur den TOP-1 Kandidaten zurück oder ``None``, wenn kein qualifi-
+    zierter Gap gefunden wurde.
+    """
+    populated_scores = [
+        c.score for c in cells.values() if c.n > 0 and c.score is not None
+    ]
+    if not populated_scores:
+        return None
+    threshold = sorted(populated_scores)[len(populated_scores) // 2]
+
+    size_idx = {s: i for i, s in enumerate(SIZE_CLASSES)}
+    lux_idx = {l: i for i, l in enumerate(LUXURY_CLASSES)}
+    candidates: list[tuple[float, str, str, int, tuple]] = []
+
+    for (size, lux), cell in cells.items():
+        if cell.n >= min_sample:
+            continue   # genug Angebot, keine Lücke
+        si, li = size_idx[size], lux_idx[lux]
+        neighbors: list[tuple[str, str, int, float]] = []
+        for ds, dl in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            ni, nj = si + ds, li + dl
+            if 0 <= ni < len(SIZE_CLASSES) and 0 <= nj < len(LUXURY_CLASSES):
+                ncell = cells.get((SIZE_CLASSES[ni], LUXURY_CLASSES[nj]))
+                if ncell and ncell.n > 0 and ncell.score is not None:
+                    neighbors.append(
+                        (SIZE_CLASSES[ni], LUXURY_CLASSES[nj], ncell.n, ncell.score)
+                    )
+        if not neighbors:
+            continue
+        adj_score = sum(n[3] for n in neighbors) / len(neighbors)
+        strongest = max(neighbors, key=lambda n: n[3])
+        candidates.append((adj_score, size, lux, cell.n, strongest))
+
+    candidates.sort(key=lambda c: -c[0])
+    for adj_score, size, lux, own_n, strongest in candidates:
+        if adj_score < threshold:
+            break
+        s_label = f"{_size_klartext(strongest[0])} · {strongest[1]}"
+        rationale = (
+            f"{own_n} Wettbewerber im Segment, aber starkes Demand-Signal "
+            f"aus Nachbar-Cell {s_label} ({strongest[2]} Listings, Ø "
+            f"{int(round(strongest[3]))} Bewertungen je Apartment). "
+            f"First-Mover-Position möglich — höheres Risiko, dafür "
+            f"unbesetzte Position im Markt."
+        )
+        return GapCandidate(
+            size_class=size,
+            luxury_class=lux,
+            n=own_n,
+            adjacency_score=adj_score,
+            strongest_neighbor_label=s_label,
+            strongest_neighbor_n=strongest[2],
+            strongest_neighbor_score=strongest[3],
+            rationale=rationale,
+        )
+    return None
 
 
 def _rank_underserved_segments(
@@ -482,6 +576,8 @@ def build_segment_matrix(
     matrix.underserved = _rank_underserved_segments(
         cells, cell_rows, matrix.best_cell, int(cfg.get("underserved_max", 3)), cfg
     )
+    # Pionier-Alternative: weiße Flecken mit starkem Nachbar-Demand-Signal.
+    matrix.gap_cell = _find_gap_cell(cells, min_sample)
     return matrix
 
 
