@@ -511,6 +511,43 @@ def test_kernthesen_generated_from_best_cell_and_profile():
     assert "1-Zimmer" in t3.headline or "Studio" in t3.headline
 
 
+def test_kernthesen_t3_skips_generic_amenities():
+    """T3 darf nicht 'Bed linens' oder 'Carbon monoxide alarm' nennen —
+    diese Items sind überall vorhanden und liefern Stakeholdern keinen
+    Differenzierungswert. Stattdessen die nächste relevante Amenity."""
+    cfg = {
+        "min_sample": 3,
+        "luxury_weights": {"price": 0.0, "amenity": 1.0},
+        "underserved_max": 0,
+        "common_amenities_max": 6,
+    }
+    # Alle 4 Listings haben die generischen Items + Wifi + River view.
+    # 'River view' hat 100 % Share und ist differenzierend → soll auftauchen.
+    # 'Bed linens' hat 100 % Share, ist aber generisch → NICHT auftauchen.
+    rows = [
+        _row(f"r{i}", "1BR", 150, 100, amenity_score=0.4,
+             bedrooms=1, beds=2, max_guests=3,
+             amenities=[
+                 "Bed linens", "Carbon monoxide alarm", "Smoke alarm",
+                 "Wifi", "River view", "Air conditioning",
+             ])
+        for i in range(4)
+    ]
+    matrix = build_segment_matrix(
+        rows, config=cfg, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    t3 = next(t for t in matrix.kernthesen if t.label == "T3")
+    # Generische Amenities dürfen NICHT erscheinen
+    assert "Bed linens" not in t3.headline
+    assert "Carbon monoxide" not in t3.headline
+    assert "Smoke alarm" not in t3.headline
+    # Differenzierende Amenities sollen erscheinen
+    has_distinctive = any(
+        a in t3.headline for a in ("Wifi", "River view", "Air conditioning")
+    )
+    assert has_distinctive, f"keine differenzierende Amenity in T3: {t3.headline}"
+
+
 def test_kernthesen_include_gap_when_pioneer_alternative_exists():
     """Wenn der Lücken-Finder eine Pionier-Alternative meldet, wird sie als
     Tn (nach den Mainstream-Thesen) ins TL;DR aufgenommen."""
