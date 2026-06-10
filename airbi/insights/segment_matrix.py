@@ -405,6 +405,73 @@ _GENERIC_AMENITY_TOKENS: tuple[str, ...] = (
 )
 
 
+# Übersetzungen für die häufigsten Airbnb-Amenities, die nach dem Stop-Filter
+# in den Kernthesen landen können. Treffer = key.lower() in name.lower() (kein
+# RegEx, kein Mehrfachersatz). Reihenfolge unwichtig: erster Match gewinnt.
+_AMENITY_DE: tuple[tuple[str, str], ...] = (
+    ("dedicated workspace", "Arbeitsplatz"),
+    ("dining table", "Esstisch"),
+    ("air conditioning", "Klimaanlage"),
+    ("wifi", "WLAN"),
+    ("river view", "Flussblick"),
+    ("sea view", "Meerblick"),
+    ("ocean view", "Meerblick"),
+    ("city skyline view", "Stadtblick"),
+    ("city view", "Stadtblick"),
+    ("garden view", "Gartenblick"),
+    ("mountain view", "Bergblick"),
+    ("courtyard view", "Innenhof-Blick"),
+    ("pool view", "Poolblick"),
+    ("balcony", "Balkon"),
+    ("patio or balcony", "Terrasse oder Balkon"),
+    ("patio", "Terrasse"),
+    ("terrace", "Terrasse"),
+    ("private pool", "eigener Pool"),
+    ("shared pool", "Gemeinschaftspool"),
+    ("pool", "Pool"),
+    ("hot tub", "Whirlpool"),
+    ("sauna", "Sauna"),
+    ("gym", "Fitnessraum"),
+    ("elevator", "Aufzug"),
+    ("free parking on premises", "kostenloser Stellplatz"),
+    ("paid parking on premises", "Stellplatz (gegen Gebühr)"),
+    ("free parking", "kostenlose Parkplätze"),
+    ("paid parking", "Parkplätze (gegen Gebühr)"),
+    ("washer", "Waschmaschine"),
+    ("dryer", "Trockner"),
+    ("dishwasher", "Geschirrspüler"),
+    ("microwave", "Mikrowelle"),
+    ("oven", "Backofen"),
+    ("coffee maker", "Kaffeemaschine"),
+    ("nespresso", "Nespresso-Maschine"),
+    ("toaster", "Toaster"),
+    ("bbq grill", "Grill"),
+    ("grill", "Grill"),
+    ("fire pit", "Feuerstelle"),
+    ("outdoor furniture", "Außenmöbel"),
+    ("outdoor dining area", "Essbereich im Freien"),
+    ("cable tv", "Kabel-TV"),
+    ("smart tv", "Smart TV"),
+    ("hdtv", "HD-TV"),
+    ("netflix", "Netflix"),
+    ("pets allowed", "Haustiere erlaubt"),
+    ("crib", "Babybett"),
+    ("high chair", "Hochstuhl"),
+    ("books and reading material", "Bücher"),
+    ("board games", "Brettspiele"),
+)
+
+
+def _translate_amenity(name: str) -> str:
+    """Liefert den deutschen Klartext-Namen einer Amenity, wenn bekannt;
+    sonst den Original-Namen unverändert zurück."""
+    n = name.lower()
+    for key, de in _AMENITY_DE:
+        if key in n:
+            return de
+    return name
+
+
 def _is_distinctive_amenity(name: str) -> bool:
     """True, wenn die Amenity in T3 als Profil-Merkmal taugt — schließt
     generische Hygiene-/Sicherheits-Items aus."""
@@ -457,9 +524,10 @@ def _build_kernthesen(matrix: "SegmentMatrix") -> list[Kernthese]:
             detail_p = (
                 f"Die Spannweite reicht von {int(profile.price_min)} € bis "
                 f"{int(profile.price_max)} € — der Median ist also kein "
-                f"Einzelfall, sondern Mitte einer breiten Anbieter-Verteilung. "
-                f"Für ein eigenes Objekt liefert das ein realistisches "
-                f"Pricing-Fenster, nicht nur einen Schätzwert."
+                f"Einzelfall, sondern liegt mitten in einer breiten "
+                f"Anbieter-Verteilung. Für ein eigenes Objekt ergibt sich "
+                f"daraus ein realistischer Preisrahmen, kein bloßer "
+                f"Schätzwert."
             )
         else:
             detail_p = (
@@ -489,9 +557,11 @@ def _build_kernthesen(matrix: "SegmentMatrix") -> list[Kernthese]:
             f"Die erfolgreichen Wohnungen in diesem Segment sind kompakt "
             f"geschnittene {sz}{beds_part}{guests_part}."
         )
-        # Top differenzierende Amenities (Stop-Liste filtert Hygiene/Sicherheit).
+        # Top differenzierende Amenities (Stop-Liste filtert Hygiene/Sicherheit)
+        # — ins Deutsche übersetzen, falls die Quelle Englisch geliefert hat.
         picks = [
-            name for name, share in profile.common_amenities
+            _translate_amenity(name)
+            for name, share in profile.common_amenities
             if share >= 0.5 and _is_distinctive_amenity(name)
         ][:3]
         if picks:

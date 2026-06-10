@@ -511,6 +511,61 @@ def test_kernthesen_generated_from_best_cell_and_profile():
     assert "1-Schlafzimmer" in t3.headline or "Studios" in t3.headline
 
 
+def test_kernthesen_t3_translates_english_amenity_names():
+    """Airbnb liefert Amenity-Namen auf Englisch ('Dedicated workspace',
+    'Dining table'). These 3 muss sie ins Deutsche übersetzen, damit
+    der TL;DR ein homogen deutscher Text bleibt."""
+    cfg = {
+        "min_sample": 3,
+        "luxury_weights": {"price": 0.0, "amenity": 1.0},
+        "underserved_max": 0,
+    }
+    rows = [
+        _row(f"r{i}", "1BR", 150, 100, amenity_score=0.4,
+             bedrooms=1, beds=2, max_guests=3,
+             amenities=["Dedicated workspace", "Dining table",
+                        "Air conditioning"])
+        for i in range(4)
+    ]
+    matrix = build_segment_matrix(
+        rows, config=cfg, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    t3 = next(t for t in matrix.kernthesen if t.label == "These 3")
+    full = t3.headline + " " + t3.detail
+    assert "Arbeitsplatz" in full
+    assert "Esstisch" in full or "Klimaanlage" in full
+    # Englische Original-Namen dürfen NICHT mehr auftauchen
+    assert "Dedicated workspace" not in full
+    assert "Dining table" not in full
+    assert "Air conditioning" not in full
+
+
+def test_kernthesen_t2_uses_german_preisrahmen_not_pricing_window():
+    """'Pricing-Fenster' ist Tool-Jargon — These 2 sagt 'Preisrahmen'."""
+    cfg = {
+        "min_sample": 3,
+        "luxury_weights": {"price": 0.0, "amenity": 1.0},
+        "underserved_max": 0,
+    }
+    # Drei verschiedene Preise → profile.price_min/max werden gesetzt,
+    # detail_p nimmt den Spannweiten-Zweig.
+    rows = [
+        _row("a", "1BR", 100, 100, amenity_score=0.4,
+             bedrooms=1, beds=2, max_guests=3),
+        _row("b", "1BR", 150, 100, amenity_score=0.4,
+             bedrooms=1, beds=2, max_guests=3),
+        _row("c", "1BR", 200, 100, amenity_score=0.4,
+             bedrooms=1, beds=2, max_guests=3),
+    ]
+    matrix = build_segment_matrix(
+        rows, config=cfg, radius_km=2.0, center_label=_LABEL, crawl_run_id=1,
+    )
+    t2 = next(t for t in matrix.kernthesen if t.label == "These 2")
+    full = t2.headline + " " + t2.detail
+    assert "Pricing" not in full
+    assert "Preisrahmen" in full
+
+
 def test_kernthesen_have_no_internal_jargon():
     """Stakeholder-Sprache: keine Tool-Begriffe wie 'Nachbar-Cell', 'Demand-
     Signal', 'Pricing-Window', 'TL;DR'."""
@@ -531,7 +586,8 @@ def test_kernthesen_have_no_internal_jargon():
     )
     assert matrix.gap_cell is not None  # sonst greift These 4 nicht
     forbidden = ("Nachbar-Cell", "Demand-Signal", "TL;DR", "Sweet-Spot",
-                 "Best-Cell", "Bew./Apt", "First-Mover", "Pricing-Window")
+                 "Best-Cell", "Bew./Apt", "First-Mover", "Pricing-Window",
+                 "Pricing-Fenster", "Dedicated workspace", "Dining table")
     for t in matrix.kernthesen:
         full = t.headline + " " + t.detail
         for token in forbidden:
@@ -571,9 +627,9 @@ def test_kernthesen_t3_skips_generic_amenities():
     assert "Bed linens" not in full
     assert "Carbon monoxide" not in full
     assert "Smoke alarm" not in full
-    # Differenzierende Amenities sollen erscheinen (im Detail-Teil)
+    # Differenzierende Amenities sollen erscheinen — übersetzt ins Deutsche
     has_distinctive = any(
-        a in full for a in ("Wifi", "River view", "Air conditioning")
+        a in full for a in ("WLAN", "Flussblick", "Klimaanlage")
     )
     assert has_distinctive, f"keine differenzierende Amenity in These 3: {full}"
 
