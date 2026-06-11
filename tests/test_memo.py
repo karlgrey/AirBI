@@ -298,6 +298,51 @@ def test_compute_memo_uses_home_radius_and_config_anchors(db_session):
     assert [a.name for a in memo.anchors] == ["Alfama/Graça"]
 
 
+# ---------------------------------------------------------------------------
+# Fix 1: _density_phrase flächennormiert
+# ---------------------------------------------------------------------------
+
+from airbi.insights.memo import _density_phrase
+
+
+def test_density_phrase_normalizes_by_area():
+    """Anker mit kleinerem Radius aber ähnlicher Roh-Anzahl ist pro km²
+    deutlich dichter — die Formulierung muss das widerspiegeln."""
+    anchor = AnchorStats(name="Alfama/Graça", radius_km=1.2, listing_count=131)
+    # Heimmarkt: 148 Listings in 2.0 km -> ~11.8/km²; Anker: ~29/km²
+    # -> Heimmarkt hat ~0.4 der Anker-Dichte, NICHT "vergleichbar"
+    phrase = _density_phrase(148, 2.0, anchor)
+    assert "vergleichbare" not in phrase
+    assert phrase != ""
+
+
+def test_density_phrase_equal_density_is_comparable():
+    anchor = AnchorStats(name="X", radius_km=1.0, listing_count=25)
+    # 100 Listings in 2.0 km = 100/12.57 ≈ 8/km²; Anker 25/3.14 ≈ 8/km²
+    assert "vergleichbare" in _density_phrase(100, 2.0, anchor)
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: Zona de Contenção Warnung im Risiko-Kapitel
+# ---------------------------------------------------------------------------
+
+
+def test_build_memo_risk_chapter_warns_on_contencao_zone():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2,
+                      al_zone_status="CONTENCAO")
+    risk = memo.chapters[-1].plain_text
+    assert "Zona de Contenção" in risk
+    assert "Lizenz" in risk
+
+
+def test_build_memo_risk_chapter_quiet_on_absorcao_zone():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2,
+                      al_zone_status="ABSORCAO")
+    risk = memo.chapters[-1].plain_text
+    assert "Zona de Contenção" not in risk
+    assert "ungeprüft" not in risk
+
+
 def test_compute_memo_falls_back_to_smallest_band_radius(db_session):
     cfg = SearchConfig(name="Memo-Fallback-Test", city_slug="lisboa",
                        center_lat=38.7390, center_lng=-9.1044,

@@ -198,10 +198,13 @@ def _median_cell_score(matrix: SegmentMatrix) -> float | None:
     return (scores[mid - 1] + scores[mid]) / 2
 
 
-def _density_phrase(home_count: int, anchor: AnchorStats) -> str:
-    if anchor.listing_count <= 0:
+def _density_phrase(home_count: int, home_radius_km: float, anchor: AnchorStats) -> str:
+    import math
+    home_area = math.pi * home_radius_km ** 2
+    anchor_area = math.pi * anchor.radius_km ** 2
+    if anchor.listing_count <= 0 or anchor_area <= 0 or home_area <= 0:
         return ""
-    ratio = home_count / anchor.listing_count
+    ratio = (home_count / home_area) / (anchor.listing_count / anchor_area)
     if ratio < 0.15:
         return "ein Bruchteil dieser Dichte"
     if ratio < 0.45:
@@ -264,10 +267,10 @@ def build_memo(
         frags.append(Fragment("text", "Zum Vergleich:"))
         for a in anchors:
             frags.append(Fragment("chip_muted", f"{a.name} {a.listing_count} Apartments"))
-        phrase = _density_phrase(home_matrix.listing_count, first)
+        phrase = _density_phrase(home_matrix.listing_count, radius, first)
         if phrase:
             frags.append(Fragment("text", (
-                f"— der Heimmarkt hat {phrase}, typisch für eine junge Lage "
+                f"— auf die Fläche gerechnet hat der Heimmarkt {phrase}, typisch für eine junge Lage "
                 f"mit Raum für neue Anbieter."
             )))
     chapters.append(MemoChapter(f"{len(chapters) + 1:02d}", "Der Markt vor Ort", frags))
@@ -334,6 +337,13 @@ def build_memo(
         frags.append(Fragment("text", (
             "Die AL-Lizenz-Lage (Zonas de Contenção) ist für diese Adresse noch "
             "ungeprüft — vor einer Investitionsentscheidung zwingend zu klären."
+        )))
+    elif al_zone_status in ("CONTENCAO", "CONTENCAO_ABSOLUTA"):
+        frags.append(Fragment("text", (
+            "Die Adresse liegt in einer Zona de Contenção — neue Alojamento-"
+            "Local-Lizenzen sind dort eingeschränkt oder ausgesetzt. Ohne eine "
+            "bestehende, übertragbare Lizenz ist das ein hartes Ausschluss-Risiko "
+            "und vor allem anderen zu klären."
         )))
     if bcell.n < 2 * home_matrix.min_sample:
         frags.append(Fragment("text", (
