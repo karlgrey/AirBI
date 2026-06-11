@@ -473,8 +473,8 @@ def test_gap_cell_detects_white_spot_with_strong_neighbor():
     assert "1 Schlafzimmer" in gap.strongest_neighbor_label
     assert "Luxury" in gap.strongest_neighbor_label
     assert gap.strongest_neighbor_n == 5
-    assert "0 Wettbewerber" in gap.rationale
-    assert "First-Mover" in gap.rationale
+    assert "0 Anbieter" in gap.rationale
+    assert "ohne direkten Wettbewerb" in gap.rationale
 
 
 def test_gap_cell_none_when_no_listings():

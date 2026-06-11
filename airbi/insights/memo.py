@@ -152,7 +152,9 @@ def compute_anchor_stats(
 ) -> AnchorStats:
     """Statistik eines Vergleichsmarkts. Klassifikation in der EIGENEN
     Kohorte des Anker-Markts (Spec §2.2); `segment` ist die Heimmarkt-
-    Empfehlung (size, lux), deren Pendant im Anker gesucht wird."""
+    Empfehlung (size, lux), deren Pendant im Anker gesucht wird.
+    Vergleichsmärkte müssen in derselben Stadt liegen wie die SearchConfig
+    (city_slug-Filter) — ein Anker in einer anderen Stadt liefert still 0 Listings."""
     rows = _load_rows_for_center(
         session, search_config, crawl_run,
         market["lat"], market["lng"], market["radius_km"],

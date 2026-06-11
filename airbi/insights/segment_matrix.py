@@ -356,11 +356,11 @@ def _find_gap_cell(cells: dict, min_sample: int) -> GapCandidate | None:
             break
         s_label = f"{_size_klartext(strongest[0])} · {strongest[1]}"
         rationale = (
-            f"{own_n} Wettbewerber im Segment, aber starkes Demand-Signal "
-            f"aus Nachbar-Cell {s_label} ({strongest[2]} Listings, Ø "
-            f"{int(round(strongest[3]))} Bewertungen je Apartment). "
-            f"First-Mover-Position möglich — höheres Risiko, dafür "
-            f"unbesetzte Position im Markt."
+            f"Im Segment selbst gibt es bislang {own_n} Anbieter, direkt "
+            f"benachbarte Klassen zeigen aber starke Nachfrage — das benachbarte "
+            f"Segment {s_label} kommt auf {int(round(strongest[3]))} Bewertungen "
+            f"je Apartment bei {strongest[2]} Anbietern. Wer hier zuerst anbietet, "
+            f"startet ohne direkten Wettbewerb."
         )
         return GapCandidate(
             size_class=size,

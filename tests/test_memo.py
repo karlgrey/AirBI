@@ -231,6 +231,16 @@ def test_build_memo_anchorless_renders_without_anchor_chips():
     assert not [f for f in ch2.fragments if f.kind == "chip_muted"]
 
 
+def test_build_memo_stale_data_yields_confidence_duenn():
+    """data_age_days=20 (>14) → CONFIDENCE_DUENN, nicht SOLIDE.
+    Stellt sicher, dass der Template-Zweig '{% if memo.confidence == "solide Indizien" %}'
+    (Velocity-Hinweis) bei DUENN-Stufe schweigt — veraltete Daten ≠ fehlende
+    Verlaufsdaten, der Hinweis wäre irreführend."""
+    memo = build_memo(_home_matrix(), [], data_age_days=20)
+    assert memo.confidence == CONFIDENCE_DUENN
+    assert memo.confidence != CONFIDENCE_SOLIDE
+
+
 JARGON_BLACKLIST = [
     "Nachbar-Cell",
     "Demand-Signal",

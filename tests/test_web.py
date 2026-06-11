@@ -202,10 +202,10 @@ def test_matrix_empty_cell_uses_em_dash(client, db_session):
 
 
 def test_top_apartments_section_renamed(client, db_session):
-    """Die Top-Performer-Sektion heißt im UI 'Top-Apartments'.
+    """Prüft, dass der Section-Titel 'Top-Apartments' lautet.
 
-    'Top-Performer' darf im Investment-Brief vorkommen ('Profil der
-    Top-Performer.') — das ist die Konzept-Sprache, nicht der Section-Titel.
+    Der alte Titel 'Top-Performer' darf nicht mehr als sichtbarer
+    Section-Header erscheinen (kein '>Top-Performer<' im HTML).
     """
     _seed_marvila(db_session)
     response = client.get("/")

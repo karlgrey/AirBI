@@ -24,7 +24,7 @@
         Vertrauen:
         <span class="font-semibold text-amber-700">
           {% for i in range(memo.confidence_dots) %}●{% endfor %}{% for i in range(3 - memo.confidence_dots) %}○{% endfor %}
-          {{ memo.confidence }}</span>{% if memo.confidence != "belastbar" %} — Verlaufsdaten bauen sich auf{% endif %}
+          {{ memo.confidence }}</span>{% if memo.confidence == "solide Indizien" %} — Verlaufsdaten bauen sich auf{% endif %}
       </p>
     </header>
 
