@@ -115,3 +115,140 @@ def test_compute_anchor_stats_segment_uses_local_cohort(db_session):
     market = {"name": "Alfama/Graça", "lat": 38.714, "lng": -9.128, "radius_km": 1.2}
     stats = compute_anchor_stats(db_session, cfg, run, market, segment=("1BR", "Luxury"))
     assert stats.segment_n >= 1               # das 300er-Listing ist lokal Luxury
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Kapitel-Generator build_memo + Jargon-Vertrag
+# ---------------------------------------------------------------------------
+
+from airbi.insights.segment_matrix import build_segment_matrix, ListingRow
+from airbi.insights.memo import build_memo
+
+
+def _row(airbnb_id, size_class, price, review_count):
+    return ListingRow(
+        airbnb_id=airbnb_id, title=f"L{airbnb_id}", url=f"https://x/{airbnb_id}",
+        size_class=size_class, price=Decimal(str(price)),
+        review_count=review_count, rating=4.8,
+    )
+
+
+def _home_matrix():
+    """Heimmarkt mit klarer Best-Cell. WICHTIG: die drei 1BR-Zeilen haben
+    bewusst IDENTISCHE Preise — gleiches Preis-Perzentil heißt gleiche
+    Luxusklasse, nur so erreicht die Zelle n=3 (sonst keine Best-Cell)."""
+    rows = [
+        _row("h1", "1BR", 100, 40), _row("h2", "1BR", 100, 35), _row("h3", "1BR", 100, 45),
+        _row("h4", "2BR", 200, 5), _row("h5", "2BR", 210, 8), _row("h6", "2BR", 190, 2),
+        _row("h7", "Studio", 60, 1),
+    ]
+    return build_segment_matrix(
+        rows, config={}, radius_km=2.0,
+        center_label="R. Cap. Leitão 86", crawl_run_id=1,
+    )
+
+
+def _anchors():
+    return [
+        AnchorStats(name="Alfama/Graça", radius_km=1.2, listing_count=240,
+                    segment_n=30, segment_score=52.0, segment_adr=120.0),
+        AnchorStats(name="Parque das Nações", radius_km=1.5, listing_count=150,
+                    segment_n=12, segment_score=41.0, segment_adr=110.0),
+    ]
+
+
+def test_build_memo_verdict_names_segment_and_confidence():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2)
+    assert memo.verdict_size_label == "1 Schlafzimmer"
+    assert memo.verdict_luxury_class in ("Budget", "Mid", "Premium", "Luxury")
+    assert memo.confidence == CONFIDENCE_SOLIDE
+    assert memo.confidence_dots == 2
+
+
+def test_build_memo_has_four_chapters_with_gap_else_three():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2)
+    titles = [c.title for c in memo.chapters]
+    assert titles[0] == "Der Markt vor Ort"
+    assert titles[1] == "Wo die Nachfrage hinläuft"
+    assert titles[-1] == "Was dagegen spricht"
+    # Kapitel "Die Alternative" nur, wenn der Lücken-Finder fündig wurde:
+    if _home_matrix().gap_cell:
+        assert "Die Alternative" in titles
+
+
+def test_build_memo_chapter1_anchors_density():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2)
+    ch1 = memo.chapters[0].plain_text
+    assert "7" in ch1                  # Heimmarkt-Dichte (listing_count)
+    assert "Alfama/Graça" in ch1       # Anker benannt
+    assert "240" in ch1                # Anker-Dichte
+
+
+def test_build_memo_chapter2_has_value_chip_with_median_factor_and_anchor_chips():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2)
+    ch2 = memo.chapters[1]
+    chips = [f for f in ch2.fragments if f.kind == "chip"]
+    muted = [f for f in ch2.fragments if f.kind == "chip_muted"]
+    assert any("Bewertungen je Apartment" in c.text for c in chips)
+    assert any("×" in c.text for c in chips)            # Median-Faktor
+    assert any("Alfama/Graça" in m.text for m in muted)  # Anker-Chip
+    assert any("52" in m.text for m in muted)
+
+
+def test_build_memo_chapter2_stock_wording_without_velocity():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2)
+    ch2 = memo.chapters[1].plain_text
+    assert "gesammelt" in ch2          # Bestands-Formulierung (Teil-3-Weiche)
+
+
+def test_build_memo_risk_chapter_names_age_proxy_and_al():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=9)
+    risk = memo.chapters[-1].plain_text
+    assert "9 Tage" in risk
+    assert "Indikator" in risk         # Proxy-Annahme
+    assert "AL-Lizenz" in risk         # ungeprüft (al_zone_status=None)
+
+
+def test_build_memo_risk_chapter_skips_al_when_zone_known():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2,
+                      al_zone_status="ABSORCAO")
+    assert "AL-Lizenz" not in memo.chapters[-1].plain_text
+
+
+def test_build_memo_silent_without_best_cell():
+    rows = [_row("x1", "1BR", 100, 5)]   # nur 1 Listing -> alles thin
+    matrix = build_segment_matrix(rows, config={}, radius_km=2.0,
+                                  center_label="X", crawl_run_id=1)
+    memo = build_memo(matrix, [], data_age_days=2)
+    assert memo.verdict_size_label is None
+    assert memo.chapters == []
+    assert "3" in memo.verdict_subline   # nennt die min_sample-Schwelle
+
+
+def test_build_memo_anchorless_renders_without_anchor_chips():
+    memo = build_memo(_home_matrix(), [], data_age_days=2)
+    ch2 = memo.chapters[1]
+    assert not [f for f in ch2.fragments if f.kind == "chip_muted"]
+
+
+JARGON_BLACKLIST = [
+    "Nachbar-Cell",
+    "Demand-Signal",
+    "TL;DR",
+    "Sweet-Spot",
+    "Best-Cell",
+    "Bew./Apt",
+    "First-Mover",
+    "Pricing-Window",
+    "Pricing-Fenster",
+    "Dedicated workspace",
+    "Dining table",
+]
+
+
+def test_memo_texts_have_no_internal_jargon():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2)
+    texts = [memo.verdict_subline] + [c.plain_text for c in memo.chapters]
+    for text in texts:
+        for term in JARGON_BLACKLIST:
+            assert term.lower() not in text.lower(), f"Jargon '{term}' in: {text}"

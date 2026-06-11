@@ -17,6 +17,7 @@ from airbi.geo.distance import haversine_km
 from airbi.insights.segment_matrix import (
     ListingRow,
     SegmentMatrix,
+    _size_klartext,
     build_segment_matrix,
 )
 
@@ -172,3 +173,191 @@ def compute_anchor_stats(
         stats.segment_score = cell.score
         stats.segment_adr = float(cell.adr) if cell.adr is not None else None
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Kapitel-Generator build_memo
+# ---------------------------------------------------------------------------
+
+
+def _fmt_score(score: float) -> str:
+    return f"{score:.0f}"
+
+
+def _median_cell_score(matrix: SegmentMatrix) -> float | None:
+    scores = sorted(
+        c.score for c in matrix.cells.values() if c.score is not None and c.n > 0
+    )
+    if not scores:
+        return None
+    mid = len(scores) // 2
+    if len(scores) % 2:
+        return scores[mid]
+    return (scores[mid - 1] + scores[mid]) / 2
+
+
+def _density_phrase(home_count: int, anchor: AnchorStats) -> str:
+    if anchor.listing_count <= 0:
+        return ""
+    ratio = home_count / anchor.listing_count
+    if ratio < 0.15:
+        return "ein Bruchteil dieser Dichte"
+    if ratio < 0.45:
+        return f"rund ein {'Drittel' if ratio >= 0.28 else 'Viertel'} dieser Dichte"
+    if ratio < 0.8:
+        return "etwa die Hälfte dieser Dichte"
+    return "eine vergleichbare Dichte"
+
+
+def build_memo(
+    home_matrix: SegmentMatrix,
+    anchors: list[AnchorStats],
+    *,
+    data_age_days: int | None,
+    al_zone_status: str | None = None,
+    velocity_available: bool = VELOCITY_AVAILABLE,
+) -> Memo:
+    """Erzeugt das Memo aus der fertigen Heimmarkt-Matrix + Anker-Statistik.
+    Ohne Best-Cell schweigt das Memo (kein Urteil, keine Kapitel)."""
+    radius = home_matrix.radius_km or 0.0
+    center = home_matrix.center_label or "das Zielobjekt"
+
+    if home_matrix.best_cell is None:
+        return Memo(
+            crawl_run_id=home_matrix.crawl_run_id,
+            home_radius_km=radius,
+            center_label=home_matrix.center_label,
+            verdict_size_label=None,
+            verdict_luxury_class=None,
+            verdict_subline=(
+                f"Im Heimmarkt ({radius:g} km um {center}) erreicht noch keine "
+                f"Kombination aus Größe und Luxusklasse {home_matrix.min_sample} "
+                f"vergleichbare Apartments — das Memo trifft deshalb kein Urteil."
+            ),
+            confidence=CONFIDENCE_DUENN,
+            confidence_dots=_CONFIDENCE_DOTS[CONFIDENCE_DUENN],
+            home_matrix=home_matrix,
+            anchors=anchors,
+            data_age_days=data_age_days,
+        )
+
+    size, lux = home_matrix.best_cell
+    bcell = home_matrix.cell(size, lux)
+    size_label = _size_klartext(size)
+    confidence = compute_confidence(
+        data_age_days=data_age_days, n=bcell.n,
+        min_sample=home_matrix.min_sample,
+        velocity_available=velocity_available,
+    )
+
+    chapters: list[MemoChapter] = []
+
+    # ---- Kapitel 1: Der Markt vor Ort -------------------------------
+    frags = [Fragment("text", (
+        f"Im Heimmarkt — {radius:g} km um {center} — stehen "
+        f"{home_matrix.listing_count} vergleichbare Apartments im Wettbewerb."
+    ))]
+    if anchors:
+        first = anchors[0]
+        frags.append(Fragment("text", "Zum Vergleich:"))
+        for a in anchors:
+            frags.append(Fragment("chip_muted", f"{a.name} {a.listing_count} Apartments"))
+        phrase = _density_phrase(home_matrix.listing_count, first)
+        if phrase:
+            frags.append(Fragment("text", (
+                f"— der Heimmarkt hat {phrase}, typisch für eine junge Lage "
+                f"mit Raum für neue Anbieter."
+            )))
+    chapters.append(MemoChapter("01", "Der Markt vor Ort", frags))
+
+    # ---- Kapitel 2: Wo die Nachfrage hinläuft ------------------------
+    verb = (
+        "wird aktuell am stärksten gebucht"
+        if velocity_available
+        else "hat je Apartment die meisten Bewertungen gesammelt"
+    )
+    frags = [Fragment("text", f"{size_label} im {lux}-Segment {verb}:")]
+    median = _median_cell_score(home_matrix)
+    chip = f"{_fmt_score(bcell.score)} Bewertungen je Apartment"
+    if median and median > 0:
+        chip += f" — {bcell.score / median:.1f}× des lokalen Medians"
+    frags.append(Fragment("chip", chip))
+    scored = [a for a in anchors if a.segment_score is not None]
+    if scored:
+        frags.append(Fragment("text", "Dieselbe Klasse erreicht in"))
+        for a in scored:
+            frags.append(Fragment("chip_muted", f"{a.name} {_fmt_score(a.segment_score)}"))
+        strongest = max(scored, key=lambda a: a.segment_score)
+        pct = int(round(100 * bcell.score / strongest.segment_score))
+        frags.append(Fragment("text", (
+            f"— der Heimmarkt liegt damit bei {pct} % des stärksten "
+            f"Vergleichsmarkts, bei deutlich weniger Wettbewerbern "
+            f"({bcell.n} gegenüber {strongest.segment_n})."
+        )))
+    chapters.append(MemoChapter("02", "Wo die Nachfrage hinläuft", frags))
+
+    # ---- Kapitel 3: Die Alternative (nur mit Lücken-Fund) -------------
+    gap = home_matrix.gap_cell
+    if gap is not None:
+        neighbor_label = _size_klartext(gap.strongest_neighbor_size_class)
+        neighbor_full = f"{neighbor_label} · {gap.strongest_neighbor_luxury_class}"
+        frags = [
+            Fragment("text", (
+                f"{_size_klartext(gap.size_class)} · {gap.luxury_class} ist im "
+                f"Heimmarkt bislang praktisch unbesetzt."
+            )),
+            Fragment("text", (
+                f"Das angrenzende Segment {neighbor_full} zeigt mit "
+                f"{gap.strongest_neighbor_n} Apartments und durchschnittlich "
+                f"{int(round(gap.strongest_neighbor_score))} Bewertungen je Apartment "
+                f"starke Nachfrage — ein Hinweis, dass diese Lücke echte Zahlungsbereitschaft "
+                f"hat. Vorteil: kaum Wettbewerb. Nachteil: weniger Erfahrungswerte."
+            )),
+        ]
+        chapters.append(MemoChapter(f"{len(chapters) + 1:02d}", "Die Alternative", frags))
+
+    # ---- Kapitel 4: Was dagegen spricht (immer) -----------------------
+    rate_pct = int(round(home_matrix.review_rate * 100))
+    frags = []
+    if data_age_days is not None:
+        age_text = f"Der Datenstand ist {data_age_days} Tage alt."
+        if data_age_days > 14:
+            age_text += " Das ist zu alt für ein belastbares Urteil — ein frischer Datenlauf steht aus."
+        frags.append(Fragment("text", age_text))
+    frags.append(Fragment("text", (
+        f"Alle Nachfrage-Werte sind aus Bewertungen abgeleitet (Annahme: rund "
+        f"{rate_pct} % der Gäste bewerten) — ein Indikator, keine gemessene Auslastung."
+    )))
+    if al_zone_status is None:
+        frags.append(Fragment("text", (
+            "Die AL-Lizenz-Lage (Zonas de Contenção) ist für diese Adresse noch "
+            "ungeprüft — vor einer Investitionsentscheidung zwingend zu klären."
+        )))
+    if bcell.n < 2 * home_matrix.min_sample:
+        frags.append(Fragment("text", (
+            f"Die Stichprobe im empfohlenen Segment ist mit {bcell.n} Apartments "
+            f"überschaubar — einzelne Ausreißer können das Bild verschieben."
+        )))
+    if confidence == CONFIDENCE_DUENN:
+        frags.append(Fragment("text", (
+            "Insgesamt ist die Datenlage dünn; dieses Memo ist als erster "
+            "Hinweis zu lesen, nicht als Entscheidungsgrundlage."
+        )))
+    chapters.append(MemoChapter(f"{len(chapters) + 1:02d}", "Was dagegen spricht", frags))
+
+    return Memo(
+        crawl_run_id=home_matrix.crawl_run_id,
+        home_radius_km=radius,
+        center_label=home_matrix.center_label,
+        verdict_size_label=size_label,
+        verdict_luxury_class=lux,
+        verdict_subline=(
+            f"die stärkste Kombination im Heimmarkt — {radius:g} km um {center}"
+        ),
+        confidence=confidence,
+        confidence_dots=_CONFIDENCE_DOTS[confidence],
+        chapters=chapters,
+        home_matrix=home_matrix,
+        anchors=anchors,
+        data_age_days=data_age_days,
+    )
