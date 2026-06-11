@@ -8,6 +8,7 @@ die Erzähl-Schicht."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from airbi.insights.segment_matrix import (
     SegmentMatrix,
     _size_klartext,
     build_segment_matrix,
+    compute_segment_matrix,
 )
 
 # Teil-3-Hook (Velocity-Modul): solange False, formuliert Kapitel 2 im
@@ -360,4 +362,41 @@ def build_memo(
         home_matrix=home_matrix,
         anchors=anchors,
         data_age_days=data_age_days,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 5: compute_memo Orchestrierung
+# ---------------------------------------------------------------------------
+
+
+def _data_age_days(crawl_run: CrawlRun) -> int | None:
+    if crawl_run.started_at is None:
+        return None
+    started = crawl_run.started_at
+    now = datetime.now(started.tzinfo) if started.tzinfo else datetime.now()
+    return max(0, (now.date() - started.date()).days)
+
+
+def compute_memo(
+    session: Session, search_config: SearchConfig, crawl_run: CrawlRun
+) -> Memo:
+    """Memo für eine SearchConfig: Heimmarkt-Matrix + Anker + Kapitel."""
+    home_radius = search_config.home_radius_km or min(
+        search_config.band_radii_km or [2.0]
+    )
+    home_matrix = compute_segment_matrix(
+        session, search_config, float(home_radius), crawl_run
+    )
+    anchors = [
+        compute_anchor_stats(
+            session, search_config, crawl_run, market, home_matrix.best_cell
+        )
+        for market in (search_config.comparison_markets or [])
+    ]
+    return build_memo(
+        home_matrix,
+        anchors,
+        data_age_days=_data_age_days(crawl_run),
+        al_zone_status=search_config.al_zone_status,
     )

@@ -262,3 +262,51 @@ def test_build_memo_survives_anchor_with_zero_segment_score():
     memo = build_memo(_home_matrix(), anchors, data_age_days=2)
     ch2 = memo.chapters[1].plain_text
     assert "Totes Viertel" not in ch2 or "%" not in ch2
+
+
+# ---------------------------------------------------------------------------
+# Task 5: compute_memo Orchestrierung
+# ---------------------------------------------------------------------------
+
+from airbi.insights.memo import compute_memo
+
+
+def test_compute_memo_uses_home_radius_and_config_anchors(db_session):
+    cfg = SearchConfig(
+        name="Memo-E2E-Test", city_slug="lisboa",
+        center_lat=38.7390, center_lng=-9.1044,
+        band_radii_km=[1, 2, 3], home_radius_km=2.0,
+        comparison_markets=[
+            {"name": "Alfama/Graça", "lat": 38.714, "lng": -9.128, "radius_km": 1.2},
+        ],
+    )
+    db_session.add(cfg)
+    db_session.flush()
+    run = CrawlRun(search_config_id=cfg.id, status="completed")
+    db_session.add(run)
+    db_session.flush()
+    # 4 Listings im Heimmarkt (~Zielobjekt), damit eine Best-Cell entsteht:
+    for i in range(4):
+        listing = _mk_listing(db_session, f"e{i}", 38.7390 + i * 0.0005, -9.1044)
+        db_session.add(Snapshot(listing_id=listing.id, crawl_run_id=run.id,
+                                price=Decimal("100"), review_count=30))
+    db_session.flush()
+
+    memo = compute_memo(db_session, cfg, run)
+    assert memo.home_radius_km == 2.0
+    assert memo.verdict_size_label is not None
+    assert [a.name for a in memo.anchors] == ["Alfama/Graça"]
+
+
+def test_compute_memo_falls_back_to_smallest_band_radius(db_session):
+    cfg = SearchConfig(name="Memo-Fallback-Test", city_slug="lisboa",
+                       center_lat=38.7390, center_lng=-9.1044,
+                       band_radii_km=[3, 1, 5])
+    db_session.add(cfg)
+    db_session.flush()
+    run = CrawlRun(search_config_id=cfg.id, status="completed")
+    db_session.add(run)
+    db_session.flush()
+    memo = compute_memo(db_session, cfg, run)
+    assert memo.home_radius_km == 1.0
+    assert memo.anchors == []
