@@ -318,7 +318,7 @@ def build_memo(
             f" Dabei stehen hier {bcell.n} Anbieter im Wettbewerb, dort {strongest.segment_n}."
         )
         frags.append(Fragment("text", closing + competitor))
-    else:
+    elif anchors:
         frags.append(Fragment("text", (
             "In den Vergleichsmärkten ist dieselbe Klasse bislang zu dünn besetzt "
             "für einen belastbaren Vergleich."

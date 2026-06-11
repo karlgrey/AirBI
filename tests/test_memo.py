@@ -229,6 +229,7 @@ def test_build_memo_anchorless_renders_without_anchor_chips():
     memo = build_memo(_home_matrix(), [], data_age_days=2)
     ch2 = memo.chapters[1]
     assert not [f for f in ch2.fragments if f.kind == "chip_muted"]
+    assert "zu dünn besetzt" not in ch2.plain_text
 
 
 def test_build_memo_stale_data_yields_confidence_duenn():
