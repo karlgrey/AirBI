@@ -17,7 +17,8 @@ mkdir -p "$LOG_DIR"
 exec >>"$LOG" 2>&1
 
 notify() {
-  /usr/bin/osascript -e "display notification \"$1 — Log: $LOG\" with title \"AirBI Daten-Uhr\""
+  local msg="${1//[\"\\]/}"
+  /usr/bin/osascript -e "display notification \"$msg — Log: $LOG\" with title \"AirBI Daten-Uhr\""
 }
 
 echo "=== AirBI scheduled crawl $STAMP (Config: $CONFIG_NAME) ==="
@@ -36,6 +37,7 @@ if ! PGPASSWORD=airbi "$PGBIN/pg_dump" --data-only --no-owner --no-privileges \
     -h localhost -U airbi -d airbi \
     -t search_config -t crawl_run -t listing -t snapshot -f "$DUMP"; then
   notify "pg_dump fehlgeschlagen"
+  rm -f "$DUMP"
   exit 1
 fi
 
