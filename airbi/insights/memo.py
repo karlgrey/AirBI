@@ -289,17 +289,39 @@ def build_memo(
     if median is not None and median > 0:
         chip += f" — {bcell.score / median:.1f}× des lokalen Medians"
     frags.append(Fragment("chip", chip))
-    scored = [a for a in anchors if a.segment_score is not None and a.segment_score > 0]
+    scored = [
+        a for a in anchors
+        if a.segment_score is not None
+        and a.segment_score > 0
+        and a.segment_n >= home_matrix.min_sample
+    ]
     if scored:
         frags.append(Fragment("text", "Dieselbe Klasse erreicht in"))
-        for a in scored:
-            frags.append(Fragment("chip_muted", f"{a.name} {_fmt_score(a.segment_score)}"))
+        for i, a in enumerate(scored):
+            if i == 0:
+                chip_text = f"{a.name}: {_fmt_score(a.segment_score)} Bewertungen je Apartment"
+            else:
+                chip_text = f"{a.name}: {_fmt_score(a.segment_score)}"
+            frags.append(Fragment("chip_muted", chip_text))
         strongest = max(scored, key=lambda a: a.segment_score)
-        pct = int(round(100 * bcell.score / strongest.segment_score))
+        ratio = bcell.score / strongest.segment_score
+        if ratio > 1.0:
+            closing = (
+                f"— der Heimmarkt liegt damit beim {ratio:.1f}-Fachen von {strongest.name}."
+            )
+        else:
+            pct = int(round(100 * ratio))
+            closing = (
+                f"— der Heimmarkt erreicht damit {pct} % des Niveaus von {strongest.name}."
+            )
+        competitor = (
+            f" Dabei stehen hier {bcell.n} Anbieter im Wettbewerb, dort {strongest.segment_n}."
+        )
+        frags.append(Fragment("text", closing + competitor))
+    elif anchors:
         frags.append(Fragment("text", (
-            f"— der Heimmarkt liegt damit bei {pct} % des stärksten "
-            f"Vergleichsmarkts, bei deutlich weniger Wettbewerbern "
-            f"({bcell.n} gegenüber {strongest.segment_n})."
+            "In den Vergleichsmärkten ist dieselbe Klasse bislang zu dünn besetzt "
+            "für einen belastbaren Vergleich."
         )))
     chapters.append(MemoChapter(f"{len(chapters) + 1:02d}", "Wo die Nachfrage hinläuft", frags))
 

@@ -229,6 +229,7 @@ def test_build_memo_anchorless_renders_without_anchor_chips():
     memo = build_memo(_home_matrix(), [], data_age_days=2)
     ch2 = memo.chapters[1]
     assert not [f for f in ch2.fragments if f.kind == "chip_muted"]
+    assert "zu dünn besetzt" not in ch2.plain_text
 
 
 def test_build_memo_stale_data_yields_confidence_duenn():
@@ -351,6 +352,46 @@ def test_build_memo_risk_chapter_quiet_on_absorcao_zone():
     risk = memo.chapters[-1].plain_text
     assert "Zona de Contenção" not in risk
     assert "ungeprüft" not in risk
+
+
+# ---------------------------------------------------------------------------
+# Kapitel-2-Vergleich: Mindest-Stichprobe, Richtungs-Logik, Einheiten
+# ---------------------------------------------------------------------------
+
+
+def test_chapter2_excludes_anchor_segments_below_min_sample():
+    """Anker-Segment mit n < min_sample darf nicht als Vergleichsbasis dienen."""
+    anchors = [AnchorStats(name="Parque das Nações", radius_km=1.5, listing_count=17,
+                           segment_n=2, segment_score=15.0, segment_adr=100.0)]
+    memo = build_memo(_home_matrix(), anchors, data_age_days=2)
+    ch2 = memo.chapters[1].plain_text
+    assert "Parque das Nações" not in ch2
+    assert "zu dünn besetzt" in ch2
+
+
+def test_chapter2_names_market_and_uses_factor_when_home_is_stronger():
+    anchors = [AnchorStats(name="Alfama/Graça", radius_km=1.2, listing_count=240,
+                           segment_n=30, segment_score=10.0, segment_adr=120.0)]
+    memo = build_memo(_home_matrix(), anchors, data_age_days=2)
+    ch2 = memo.chapters[1].plain_text
+    assert "Alfama/Graça" in ch2
+    assert "4.0-Fachen von Alfama/Graça" in ch2   # 40 / 10
+    assert "%" not in ch2                          # keine Prozent über 100
+
+
+def test_chapter2_uses_percent_when_home_is_weaker():
+    anchors = [AnchorStats(name="Alfama/Graça", radius_km=1.2, listing_count=240,
+                           segment_n=30, segment_score=52.0, segment_adr=120.0)]
+    memo = build_memo(_home_matrix(), anchors, data_age_days=2)
+    ch2 = memo.chapters[1].plain_text
+    assert "77 % des Niveaus von Alfama/Graça" in ch2   # 40/52 = 0.769
+    assert "Anbieter" in ch2
+
+
+def test_chapter2_first_anchor_chip_spells_unit():
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2)
+    muted = [f.text for f in memo.chapters[1].fragments if f.kind == "chip_muted"]
+    assert muted[0].endswith("Bewertungen je Apartment")
 
 
 def test_compute_memo_falls_back_to_smallest_band_radius(db_session):
