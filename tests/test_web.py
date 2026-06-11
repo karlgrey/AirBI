@@ -173,14 +173,15 @@ def test_matrix_uses_klartext_size_labels(client, db_session):
 
 
 def test_matrix_cell_uses_klartext_metrics(client, db_session):
-    """Matrix-Caption + Chancen-Karten verwenden ausgeschriebene Begriffe.
+    """Matrix-Caption und Anhang verwenden ausgeschriebene Begriffe.
     Matrix-Zellen selbst bleiben kompakt (Apt., /N.) und werden im Tooltip
-    erklärt."""
+    erklärt. 'Wettbewerber' war im alten Hero/Chancen-Karten; jetzt steht
+    'Marktübersicht' als Anhang-Label für die Heatmap."""
     _seed_marvila(db_session)
     response = client.get("/")
     body = response.text
-    assert "Bewertungen je Apartment" in body   # ausgeschrieben
-    assert "Wettbewerber" in body
+    assert "Bewertungen je Apartment" in body   # ausgeschrieben (Heatmap-Caption + Memo)
+    assert "Marktübersicht" in body             # Anhang-Label ersetzt alten Hero-KPI-Strip
     assert "/N." in body                         # Matrix-Zelle bleibt kompakt
 
 
@@ -246,14 +247,15 @@ def test_top_apartments_use_klartext_size_tags(client, db_session):
 
 
 def test_hero_thin_state_when_no_best_cell(client, db_session):
-    """Wenn die Datenbasis dünn ist (alle Zellen unter min_sample): Hero zeigt
-    die Thin-Variante mit 'Datenbasis zu dünn' und Hinweis auf größeren Umkreis,
-    statt einer Empfehlungs-Schlagzeile."""
+    """Wenn die Datenbasis dünn ist (alle Zellen unter min_sample): _memo.html
+    zeigt 'Datenbasis zu dünn' mit dem Memo-Subline, statt einer
+    Empfehlungs-Schlagzeile. Der alte Hinweis 'größeren Umkreis' im Hero
+    ist entfallen — das Memo formuliert seinen eigenen Subline-Text."""
     _seed_marvila(db_session)  # 6 Apartments → alle Zellen dünn (min_sample=3)
     response = client.get("/")
     body = response.text
-    assert "Datenbasis zu dünn" in body
-    assert "größeren Umkreis" in body
+    assert "Datenbasis zu dünn" in body          # jetzt aus _memo.html
+    assert "Urteil" in body                      # Urteil-Eyebrow in _memo.html thin-branch
     # Alter Recommendation-Block ist weg.
     assert "Empfehlung — noch nicht möglich" not in body
     assert "Hebel:" not in body
@@ -291,54 +293,53 @@ def _seed_winner_config(db_session, *, amenities=None, is_superhost=True):
 
 
 def test_hero_renders_best_cell_with_kpi_labels(client, db_session):
-    """Hero-Card zeigt Empfehlung-Eyebrow, die Best-Cell als Schlagzeile
-    (Größe + Luxusklasse in Klartext) und die drei KPI-Labels."""
+    """Editorial-Memo zeigt Investment-Memo-Eyebrow, die Best-Cell als
+    Schlagzeile (Größe · Luxusklasse) und Kapitel-Inhalte."""
     cfg = _seed_winner_config(db_session)
     response = client.get(f"/?config_id={cfg.id}&radius_km=2")
     body = response.text
-    # Eyebrow + Schlagzeile (Empfehlung erscheint nur noch im Hero)
-    assert "Empfehlung" in body
-    # Best-Cell wird als "Klartext-Größe · Luxusklasse" gerendert (mit
-    # Whitespace zwischen den Jinja-Blöcken — Browser kollabiert das).
+    # Memo-Eyebrow + Schlagzeile
+    assert "Investment-Memo" in body
+    # Best-Cell wird als "Klartext-Größe · Luxusklasse" gerendert
     assert "1 Schlafzimmer" in body
     assert any(tier in body for tier in ("Budget", "Mid", "Premium", "Luxury"))
-    # 3 KPI-Labels (jetzt ausgeschrieben)
-    assert "Wettbewerber" in body
-    assert "Median pro Nacht" in body
-    assert "Ø Bewertungen je Apartment" in body
+    # Kapitel-Header sichtbar
+    assert "01 — Der Markt vor Ort" in body
+    assert "Wo die Nachfrage hinläuft" in body
 
 
 def test_investment_brief_is_collapsible_details_block(client, db_session):
-    """Investment-Brief ist ein natives <details>-Element mit klickbarem
-    <summary>. So funktioniert er ohne JS und ist screenreader-tauglich."""
+    """Der Anhang ist ein natives <details>-Element mit klickbarem <summary>.
+    Der alte Investment-Brief ist entfallen; der Anhang-Block mit
+    Marktübersicht/Karte/Apartments ersetzt ihn als ausgeklappbares Element."""
     cfg = _seed_winner_config(db_session)
     body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
     assert "<details" in body
     assert "<summary" in body
-    assert "Investment-Brief" in body
+    assert "Anhang" in body                      # Anhang-Summary ersetzt Investment-Brief
 
 
 def test_brief_contains_methodology_with_proxy_disclaimer(client, db_session):
-    """Der Methodik-Absatz im Brief ersetzt den alten Proxy-Hinweis und ist
-    auch in der Thin-Variante vorhanden."""
-    _seed_marvila(db_session)
-    body = client.get("/").text
-    assert "Methodik" in body
-    assert "Indikator" in body
-    assert "% der Gäste bewerten" in body
+    """Der Proxy-Hinweis lebt jetzt im Memo-Kapitel 'Was dagegen spricht'.
+    Mit einer Best-Cell enthält das Risiko-Kapitel 'Indikator' und den
+    Prozentsatz der Gäste, die bewerten."""
+    cfg = _seed_winner_config(db_session)
+    body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
+    assert "Indikator" in body                   # Risiko-Kapitel: Proxy-Annahme
+    assert "% der Gäste bewerten" in body        # Risiko-Kapitel: Annahme ausgeschrieben
+    assert "Was dagegen spricht" in body         # Risiko-Kapitel-Titel
 
 
 def test_brief_contains_recommended_segment_profile(client, db_session):
-    """Mit Best-Cell + Detail-Daten enthält der Brief 'Profil im empfohlenen
-    Segment' samt mindestens einer Amenity und Superhost-Quote in Prozent.
-    Das Profil ist auf die Listings des Best-Cells beschränkt — konsistent
-    zur Hero-Empfehlung."""
-    cfg = _seed_winner_config(db_session)  # 2 Listings, beide Superhost, Wifi etc.
+    """Mit Best-Cell enthält das Memo das Urteil mit Größe und Luxusklasse
+    sowie Kapitel-Inhalte. Das detaillierte Profil (Amenities, Superhost)
+    war im alten Investment-Brief; dieser ist entfallen. Der Test prüft nun
+    den Memo-Inhalt: Urteil-Schlagzeile und Risiko-Kapitel."""
+    cfg = _seed_winner_config(db_session)  # 2 Listings, beide Superhost
     body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
-    assert "Profil im empfohlenen Segment" in body
-    assert "Wifi" in body
-    # Superhost-Quote als Prozent (beide Superhost → 100 %)
-    assert "100 %" in body or "100%" in body
+    assert "Investment-Memo" in body             # Memo-Eyebrow
+    assert "1 Schlafzimmer" in body              # Urteil-Schlagzeile
+    assert "Was dagegen spricht" in body         # Risiko-Kapitel immer vorhanden
 
 
 def test_dashboard_has_no_onboarding_box(client, db_session):
@@ -364,16 +365,15 @@ def test_map_section_renders_with_listings_and_data(client, db_session):
 
 
 def test_underserved_section_renders_with_other_chance_cells(client, db_session):
-    """Unterversorgungs-Sicht: 'Andere Chancen-Segmente' rendert mit
-    Mini-Cards (inkl. Prosa-Begründung) sobald es Cells außer der Best-Cell
-    mit Score gibt."""
-    cfg = _seed_winner_config(db_session)  # 2 1BR-Listings (Budget + Mid)
+    """'Andere Chancen-Segmente' ist entfallen; Chancen-Analyse lebt jetzt im
+    Memo-Kapitel 'Die Alternative' (wenn Lücken-Finder fündig wird) und in
+    Kapitel 2. Der Anhang zeigt stattdessen Marktübersicht und Karte.
+    Mit Best-Cell rendert das Memo Kapitel 2 mit 'Bewertungen je Apartment'."""
+    cfg = _seed_winner_config(db_session)  # 2 1BR-Listings
     body = client.get(f"/?config_id={cfg.id}&radius_km=2").text
-    assert "Andere Chancen-Segmente" in body
-    # KPI-Strip-Label im ausgeschriebenen Klartext
-    assert "Bewertungen je Apartment" in body
-    # Prosa-Begründung pro Card (eines der zwei Wordings muss da sein)
-    assert "Demand-Signal" in body or "unterversorgt" in body
+    assert "Andere Chancen-Segmente" not in body  # entfällt ersatzlos
+    assert "Bewertungen je Apartment" in body      # noch im Memo-Kapitel 2
+    assert "Marktübersicht" in body               # Anhang enthält Marktübersicht
 
 
 def test_underserved_section_absent_when_no_other_cells(client, db_session):
@@ -418,9 +418,45 @@ def test_dashboard_has_no_old_empfehlungs_block(client, db_session):
 
 def test_matrix_axis_is_luxusklasse(client, db_session):
     """Matrix-Achse heißt 'Luxusklasse'. Die Methodik (Preis + Amenities)
-    wandert in den Investment-Brief — der Begriff 'Luxusklasse' bleibt im
-    Matrix-Header sichtbar."""
+    wandert in das Memo-Kapitel 'Was dagegen spricht' — der Begriff
+    'Luxusklasse' bleibt im Anhang-Marktübersicht-Header sichtbar."""
     _seed_marvila(db_session)
     response = client.get("/")
     body = response.text
     assert "Luxusklasse" in body
+
+
+def test_dashboard_renders_memo_with_anchor_chips(client, db_session):
+    """Mit comparison_markets in der SearchConfig enthält das gerenderte
+    Dashboard das Investment-Memo und das Kapitel 'Wo die Nachfrage hinläuft'."""
+    from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
+
+    cfg = SearchConfig(
+        name="Memo-Anker-Test",
+        center_lat=38.7391, center_lng=-9.1048, center_label="R. Cap. Leitão 86",
+        classification_config={"min_sample": 1},
+        comparison_markets=[
+            {"name": "Alfama/Graça", "lat": 38.714, "lng": -9.128, "radius_km": 1.2},
+        ],
+    )
+    run = CrawlRun(search_config=cfg, status="completed", listings_seen=2)
+    db_session.add(run)
+    db_session.flush()
+    for i, (price, reviews) in enumerate([(100, 50), (110, 60)]):
+        listing = Listing(
+            airbnb_id=f"A{i}", city_slug="lisboa", district_slug=None,
+            lat=38.7395, lng=-9.1050, property_type="Apartment",
+            bedrooms=1, size_class="1BR", title=f"Anker {i}", url=f"https://x/A{i}",
+        )
+        db_session.add(listing)
+        db_session.flush()
+        db_session.add(Snapshot(
+            listing_id=listing.id, crawl_run_id=run.id,
+            price=Decimal(str(price)), review_count=reviews, rating=4.7,
+        ))
+    db_session.flush()
+
+    resp = client.get(f"/?config_id={cfg.id}")
+    assert resp.status_code == 200
+    assert "Investment-Memo" in resp.text
+    assert "Wo die Nachfrage hinläuft" in resp.text
