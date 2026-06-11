@@ -109,18 +109,6 @@ class MapListing:
 
 
 @dataclass
-class Kernthese:
-    """Kompakte, scanbare Aussage über den Markt eines Radius — drei bis fünf
-    davon ergeben das 'TL;DR' fürs Stakeholder-Briefing. Generiert aus der
-    Matrix; jedes Feature ist eine Aussage über VORHANDENE Daten, nicht
-    Spekulation."""
-
-    label: str           # T1, T2, ...
-    headline: str        # fettes Kern-Statement
-    detail: str = ""     # ergänzender Beleg (Zahlen, Quelle)
-
-
-@dataclass
 class GapCandidate:
     """Ein 'weißer Fleck' in der Matrix: Cell ohne (oder kaum) Angebot, deren
     Nachbar-Cells aber starke Demand zeigen — Hinweis auf Pionier-Position
@@ -193,7 +181,6 @@ class SegmentMatrix:
     top_performer_profile: TopPerformerProfile | None = None
     underserved: list[UnderservedSegment] = field(default_factory=list)
     gap_cell: GapCandidate | None = None             # Pionier-Alternative zur Best-Cell
-    kernthesen: list[Kernthese] = field(default_factory=list)  # TL;DR für Stakeholder
     map_listings: list[MapListing] = field(default_factory=list)
     map_data: dict = field(default_factory=dict)   # JSON-fertig fürs Template
     luxury_price_threshold: float | None = None    # €/Nacht ab dem Top-Quartil
@@ -369,11 +356,11 @@ def _find_gap_cell(cells: dict, min_sample: int) -> GapCandidate | None:
             break
         s_label = f"{_size_klartext(strongest[0])} · {strongest[1]}"
         rationale = (
-            f"{own_n} Wettbewerber im Segment, aber starkes Demand-Signal "
-            f"aus Nachbar-Cell {s_label} ({strongest[2]} Listings, Ø "
-            f"{int(round(strongest[3]))} Bewertungen je Apartment). "
-            f"First-Mover-Position möglich — höheres Risiko, dafür "
-            f"unbesetzte Position im Markt."
+            f"Im Segment selbst gibt es bislang {own_n} Anbieter, direkt "
+            f"benachbarte Klassen zeigen aber starke Nachfrage — das benachbarte "
+            f"Segment {s_label} kommt auf {int(round(strongest[3]))} Bewertungen "
+            f"je Apartment bei {strongest[2]} Anbietern. Wer hier zuerst anbietet, "
+            f"startet ohne direkten Wettbewerb."
         )
         return GapCandidate(
             size_class=size,
@@ -389,244 +376,6 @@ def _find_gap_cell(cells: dict, min_sample: int) -> GapCandidate | None:
         )
     return None
 
-
-# Amenities, die in fast jedem Listing vorkommen und für die T3-Profil-These
-# keine Aussagekraft haben — Stakeholder hört „Bed linens und Carbon monoxide
-# alarm" und lernt nichts. Filtern, damit T3 differenzierende Merkmale nennt
-# (Flussblick, Klima, Pool, Workspace etc.).
-_GENERIC_AMENITY_TOKENS: tuple[str, ...] = (
-    "bed linen", "linens", "towels", "hangers", "iron",
-    "essentials", "soap", "shampoo", "conditioner", "body wash",
-    "hot water", "heating", "smoke alarm", "carbon monoxide",
-    "fire extinguisher", "first aid", "long term stays",
-    "self check-in", "self check in", "lockbox",
-    "private entrance",  # zu generisch in Lissabon
-    "dishes and silverware", "cooking basics", "kitchen", "refrigerator",
-)
-
-
-# Übersetzungen für die häufigsten Airbnb-Amenities, die nach dem Stop-Filter
-# in den Kernthesen landen können. Treffer = key.lower() in name.lower() (kein
-# RegEx, kein Mehrfachersatz). Reihenfolge unwichtig: erster Match gewinnt.
-_AMENITY_DE: tuple[tuple[str, str], ...] = (
-    ("dedicated workspace", "Arbeitsplatz"),
-    ("dining table", "Esstisch"),
-    ("air conditioning", "Klimaanlage"),
-    ("wifi", "WLAN"),
-    ("river view", "Flussblick"),
-    ("sea view", "Meerblick"),
-    ("ocean view", "Meerblick"),
-    ("city skyline view", "Stadtblick"),
-    ("city view", "Stadtblick"),
-    ("garden view", "Gartenblick"),
-    ("mountain view", "Bergblick"),
-    ("courtyard view", "Innenhof-Blick"),
-    ("pool view", "Poolblick"),
-    ("balcony", "Balkon"),
-    ("patio or balcony", "Terrasse oder Balkon"),
-    ("patio", "Terrasse"),
-    ("terrace", "Terrasse"),
-    ("private pool", "eigener Pool"),
-    ("shared pool", "Gemeinschaftspool"),
-    ("pool", "Pool"),
-    ("hot tub", "Whirlpool"),
-    ("sauna", "Sauna"),
-    ("gym", "Fitnessraum"),
-    ("elevator", "Aufzug"),
-    ("free parking on premises", "kostenloser Stellplatz"),
-    ("paid parking on premises", "Stellplatz (gegen Gebühr)"),
-    ("free parking", "kostenlose Parkplätze"),
-    ("paid parking", "Parkplätze (gegen Gebühr)"),
-    ("washer", "Waschmaschine"),
-    ("dryer", "Trockner"),
-    ("dishwasher", "Geschirrspüler"),
-    ("microwave", "Mikrowelle"),
-    ("oven", "Backofen"),
-    ("coffee maker", "Kaffeemaschine"),
-    ("nespresso", "Nespresso-Maschine"),
-    ("toaster", "Toaster"),
-    ("bbq grill", "Grill"),
-    ("grill", "Grill"),
-    ("fire pit", "Feuerstelle"),
-    ("outdoor furniture", "Außenmöbel"),
-    ("outdoor dining area", "Essbereich im Freien"),
-    ("cable tv", "Kabel-TV"),
-    ("smart tv", "Smart TV"),
-    ("hdtv", "HD-TV"),
-    ("netflix", "Netflix"),
-    ("pets allowed", "Haustiere erlaubt"),
-    ("crib", "Babybett"),
-    ("high chair", "Hochstuhl"),
-    ("books and reading material", "Bücher"),
-    ("board games", "Brettspiele"),
-)
-
-
-def _translate_amenity(name: str) -> str:
-    """Liefert den deutschen Klartext-Namen einer Amenity, wenn bekannt;
-    sonst den Original-Namen unverändert zurück."""
-    n = name.lower()
-    for key, de in _AMENITY_DE:
-        if key in n:
-            return de
-    return name
-
-
-def _is_distinctive_amenity(name: str) -> bool:
-    """True, wenn die Amenity in T3 als Profil-Merkmal taugt — schließt
-    generische Hygiene-/Sicherheits-Items aus."""
-    n = name.lower()
-    return not any(tok in n for tok in _GENERIC_AMENITY_TOKENS)
-
-
-def _kernthese_label(index: int) -> str:
-    """'These 1', 'These 2', … — ausgeschrieben, nicht 'T1'."""
-    return f"These {index}"
-
-
-def _build_kernthesen(matrix: "SegmentMatrix") -> list[Kernthese]:
-    """Erzeugt 3–5 ausformulierte Kern-Aussagen aus den bereits berechneten
-    Matrix-Feldern. Sprache: Klartext, keine Fachwörter aus dem Tool. Jede
-    These ist ein Statement über VORHANDENE Zahlen, keine Prognose."""
-    if not matrix.best_cell:
-        return []
-    out: list[Kernthese] = []
-    bsize, blux = matrix.best_cell
-    bcell = matrix.cells[matrix.best_cell]
-    size_label = _size_klartext(bsize)
-    radius_int = int(round(matrix.radius_km)) if matrix.radius_km else 0
-
-    # These 1 — Was ist die stärkste Marktposition und warum.
-    headline = (
-        f"Die am stärksten nachgefragte Wohnungs-Kategorie im Umkreis von "
-        f"{radius_int} km um das Zielobjekt ist {size_label} im "
-        f"{blux}-Segment."
-    )
-    detail = (
-        f"In dieser Kategorie konkurrieren aktuell {bcell.n} vergleichbare "
-        f"Wohnungen und sammeln im Schnitt {int(round(bcell.score))} "
-        f"Gäste-Bewertungen pro Wohnung — der mit Abstand klarste Hinweis "
-        f"darauf, dass Gäste in dieser Lage genau diese Kombination aus "
-        f"Wohnungsgröße und Preisniveau buchen."
-    )
-    out.append(Kernthese(label=_kernthese_label(len(out) + 1),
-                         headline=headline, detail=detail))
-
-    # These 2 — Preisniveau im empfohlenen Segment.
-    profile = matrix.top_performer_profile
-    if bcell.adr:
-        headline_p = (
-            f"Diese Wohnungen werden im Median für {int(bcell.adr)} € "
-            f"pro Nacht angeboten."
-        )
-        detail_p = ""
-        if profile and profile.price_min and profile.price_max:
-            detail_p = (
-                f"Die Spannweite reicht von {int(profile.price_min)} € bis "
-                f"{int(profile.price_max)} € — der Median ist also kein "
-                f"Einzelfall, sondern liegt mitten in einer breiten "
-                f"Anbieter-Verteilung. Für ein eigenes Objekt ergibt sich "
-                f"daraus ein realistischer Preisrahmen, kein bloßer "
-                f"Schätzwert."
-            )
-        else:
-            detail_p = (
-                "Der Wert beschreibt den mittleren Anbieter-Preis im "
-                "empfohlenen Segment und ist damit der belastbare "
-                "Orientierungspunkt für die eigene Pricing-Entscheidung."
-            )
-        out.append(Kernthese(label=_kernthese_label(len(out) + 1),
-                             headline=headline_p, detail=detail_p))
-
-    # These 3 — Profil der erfolgreichen Wohnungen.
-    if profile and profile.count > 0 and profile.median_bedrooms is not None:
-        sz = (
-            "Studios"
-            if profile.median_bedrooms == 0
-            else f"{profile.median_bedrooms}-Schlafzimmer-Wohnungen"
-        )
-        beds_part = (
-            f" mit {profile.median_beds} Betten"
-            if profile.median_beds else ""
-        )
-        guests_part = (
-            f" für bis zu {profile.median_max_guests} Gäste"
-            if profile.median_max_guests else ""
-        )
-        headline_x = (
-            f"Die erfolgreichen Wohnungen in diesem Segment sind kompakt "
-            f"geschnittene {sz}{beds_part}{guests_part}."
-        )
-        # Top differenzierende Amenities (Stop-Liste filtert Hygiene/Sicherheit)
-        # — ins Deutsche übersetzen, falls die Quelle Englisch geliefert hat.
-        picks = [
-            _translate_amenity(name)
-            for name, share in profile.common_amenities
-            if share >= 0.5 and _is_distinctive_amenity(name)
-        ][:3]
-        if picks:
-            picks_str = ", ".join(picks[:-1]) + (
-                f" sowie {picks[-1]}" if len(picks) > 1 else picks[-1]
-            )
-            detail_x = (
-                f"Auffällig oft sind sie ausgestattet mit {picks_str} — "
-                f"das sind die Merkmale, an denen sich erfolgreiche "
-                f"Wohnungen in dieser Lage von durchschnittlichen unter"
-                f"scheiden."
-            )
-        else:
-            detail_x = (
-                f"Basis ist der Median über {profile.count} Wohnungen im "
-                f"empfohlenen Segment."
-            )
-        out.append(Kernthese(label=_kernthese_label(len(out) + 1),
-                             headline=headline_x, detail=detail_x))
-
-    # These 4 — Mögliche Marktlücke (nur wenn Lücken-Finder fündig wurde).
-    if matrix.gap_cell:
-        gap = matrix.gap_cell
-        gap_size = _size_klartext(gap.size_class)
-        neighbor_size = _size_klartext(gap.strongest_neighbor_size_class)
-        # Erkläre die Richtung in Klartext statt mit „Nachbar-Cell".
-        if gap.strongest_neighbor_size_class != gap.size_class:
-            # Größenklasse unterscheidet sich
-            ref = (
-                f"Die nächstkleinere Wohnungs-Kategorie im selben "
-                f"{gap.luxury_class}-Segment — {neighbor_size} — "
-                if SIZE_CLASSES.index(gap.strongest_neighbor_size_class)
-                   < SIZE_CLASSES.index(gap.size_class)
-                else
-                f"Die nächstgrößere Wohnungs-Kategorie im selben "
-                f"{gap.luxury_class}-Segment — {neighbor_size} — "
-            )
-        else:
-            # Gleiche Größe, andere Luxusklasse
-            ref = (
-                f"Die nächste Preisklasse in derselben Wohnungs-Größe "
-                f"({neighbor_size} {gap.strongest_neighbor_luxury_class}) "
-            )
-        if gap.n == 0:
-            occupancy = "praktisch unbesetzt"
-        else:
-            occupancy = (
-                f"mit nur {gap.n} Anbieter{'n' if gap.n > 1 else ''} kaum besetzt"
-            )
-        headline_g = (
-            f"Eine mögliche Marktlücke: {gap_size} im {gap.luxury_class}-"
-            f"Segment sind hier {occupancy}."
-        )
-        detail_g = (
-            f"{ref}läuft mit {gap.strongest_neighbor_n} Wohnungen sehr gut "
-            f"({int(round(gap.strongest_neighbor_score))} Bewertungen im "
-            f"Schnitt). Das belegt: Gäste fragen das Preisniveau in dieser "
-            f"Lage nach — ein Objekt in der bisher kaum besetzten "
-            f"{gap_size}-Größe wäre eine plausible Pionier-Position, die "
-            f"sich vom direkten Wettbewerb abhebt."
-        )
-        out.append(Kernthese(label=_kernthese_label(len(out) + 1),
-                             headline=headline_g, detail=detail_g))
-
-    return out
 
 
 def _rank_underserved_segments(
@@ -834,9 +583,6 @@ def build_segment_matrix(
     )
     # Pionier-Alternative: weiße Flecken mit starkem Nachbar-Demand-Signal.
     matrix.gap_cell = _find_gap_cell(cells, min_sample)
-    # Kernthesen: TL;DR aus den oben berechneten Feldern, fürs Stakeholder-
-    # Briefing oben im Dashboard.
-    matrix.kernthesen = _build_kernthesen(matrix)
     return matrix
 
 

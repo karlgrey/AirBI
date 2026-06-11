@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from airbi.db.models import CrawlRun, SearchConfig
 from airbi.db.session import SessionLocal
+from airbi.insights.memo import Memo, compute_memo
 from airbi.insights.segment_matrix import (
     SegmentMatrix,
     compute_segment_matrix,
@@ -104,13 +105,17 @@ def dashboard(
             request, "dashboard.html",
             {"search_config": None, "latest_run": None,
              "matrices": [], "active_radius": radius_km,
-             "completed_run": None},
+             "completed_run": None, "memo": None},
         )
     latest_run = _latest_any_run(session, search_config)
     completed_run = latest_completed_run(session, search_config)
     matrices = (
         _matrices_for(session, search_config, radius_km, completed_run)
         if completed_run is not None else []
+    )
+    memo: Memo | None = (
+        compute_memo(session, search_config, completed_run)
+        if completed_run is not None else None
     )
     latest_run_date_de = _format_date_de(latest_run.started_at) if latest_run else None
     city_label = "Lissabon" if search_config.city_slug == "lisboa" else search_config.city_slug
@@ -124,6 +129,7 @@ def dashboard(
             "active_radius": radius_km,
             "latest_run_date_de": latest_run_date_de,
             "city_label": city_label,
+            "memo": memo,
         },
     )
 

@@ -68,6 +68,22 @@ UPDATE search_config SET center_lat=38.7391, center_lng=-9.1048,
 WHERE name='Marvila Slice 1';
 ```
 
+**Einmalig nach Migration `d4e5f6a7b8c9`** — Memo-Felder der Config setzen
+(auf dem Server identisch ausführen; bis dahin rendert das Memo mit dem
+kleinsten Band-Radius und ohne Vergleichsanker):
+```sql
+UPDATE search_config SET
+  home_radius_km = 2.0,
+  comparison_markets = '[
+    {"name": "Alfama/Graça", "lat": 38.714, "lng": -9.128, "radius_km": 1.2},
+    {"name": "Parque das Nações", "lat": 38.768, "lng": -9.094, "radius_km": 1.5}
+  ]'::json
+WHERE name = 'Marvila Slice 1';
+```
+Hinweis: Der Daten-Uhr-Sync repliziert `search_config` mit — nach dem ersten
+Sync nach diesem UPDATE ist die Prod-Config automatisch aktuell; das
+Server-UPDATE ist nur nötig, wenn das Deployment VOR dem nächsten Sync passiert.
+
 Der Crawl läuft **nicht** auf dem Server (braucht Residential-IP). Neue Daten kommen per Dump/Restore vom Dev-Rechner.
 
 **Befehle auf dem Dev-Rechner:**

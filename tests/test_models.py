@@ -87,3 +87,27 @@ def test_listing_stores_amenity_score_and_amenities(db_session):
     assert got.amenity_score == 0.73
     assert got.amenities == ["River view", "Pool"]
     assert got.description == "Tolle Aussicht"
+
+
+def test_search_config_memo_fields_roundtrip(db_session):
+    cfg = SearchConfig(
+        name="Memo-Felder-Test",
+        home_radius_km=2.0,
+        comparison_markets=[
+            {"name": "Alfama/Graça", "lat": 38.714, "lng": -9.128, "radius_km": 1.2},
+        ],
+    )
+    db_session.add(cfg)
+    db_session.flush()
+    db_session.refresh(cfg)
+    assert cfg.home_radius_km == 2.0
+    assert cfg.comparison_markets[0]["name"] == "Alfama/Graça"
+
+
+def test_search_config_memo_fields_default_to_none(db_session):
+    cfg = SearchConfig(name="Memo-Felder-Default-Test")
+    db_session.add(cfg)
+    db_session.flush()
+    db_session.refresh(cfg)
+    assert cfg.home_radius_km is None
+    assert cfg.comparison_markets is None

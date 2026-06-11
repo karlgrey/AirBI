@@ -34,6 +34,11 @@ class SearchConfig(Base):
     band_radii_km: Mapped[list] = mapped_column(
         JSON, default=lambda: [1, 2, 3, 5, 10]
     )
+    # Investment-Memo (Spec 2026-06-11): Heimmarkt + benannte Vergleichsmärkte.
+    # home_radius_km None -> Fallback auf min(band_radii_km).
+    # comparison_markets: Liste {name, lat, lng, radius_km} oder None.
+    home_radius_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    comparison_markets: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # AL-Lizenz-Layer (Brief §11): Zone des Zielobjekts.
     # Werte: 'ABSORCAO' | 'CONTENCAO' | 'CONTENCAO_ABSOLUTA' | NULL (nicht geprüft).
     al_zone_status: Mapped[str | None] = mapped_column(String(40), nullable=True)

@@ -32,57 +32,69 @@
       </div>
     </header>
 
-    {# --- Umkreis-Schalter: eigene Karte, klar als Hauptsteuerung markiert --- #}
-    <section class="mb-6 rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3.5">
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div class="shrink-0">
-          <div class="text-[10px] uppercase tracking-[0.12em] text-blue-700 font-semibold">
-            Auswertungs-Umkreis
-          </div>
-          <div class="text-[11px] text-blue-700/80 mt-0.5">
-            wechselt die gesamte Auswertung unten
-          </div>
-        </div>
-        <nav id="umkreis-nav" class="flex gap-2 flex-wrap" aria-label="Umkreis">
-          {% for r in search_config.band_radii_km %}
-            <button type="button"
-                    hx-get="/matrix?config_id={{ search_config.id }}&radius_km={{ r }}"
-                    hx-target="#matrix-region"
-                    hx-swap="innerHTML"
-                    class="umkreis-btn rounded-lg border-2 px-4 py-2 text-sm font-semibold transition-colors
-                           {% if active_radius == r %}
-                             border-slate-900 bg-slate-900 text-white shadow-md
-                           {% else %}
-                             border-slate-200 bg-white text-slate-600 hover:border-slate-400 hover:text-slate-900
-                           {% endif %}">
-              {{ r }} km
-            </button>
-          {% endfor %}
-        </nav>
-      </div>
+    <section class="mb-6">
+      {% include "_memo.html" %}
     </section>
-    <script>
-      (function () {
-        var nav = document.getElementById('umkreis-nav');
-        if (!nav) return;
-        var ACTIVE = ['border-slate-900', 'bg-slate-900', 'text-white', 'shadow-md'];
-        var INACTIVE = ['border-slate-200', 'bg-white', 'text-slate-600', 'hover:border-slate-400', 'hover:text-slate-900'];
-        nav.addEventListener('click', function (ev) {
-          var btn = ev.target.closest('.umkreis-btn');
-          if (!btn || !nav.contains(btn)) return;
-          nav.querySelectorAll('.umkreis-btn').forEach(function (b) {
-            b.classList.remove.apply(b.classList, ACTIVE);
-            b.classList.add.apply(b.classList, INACTIVE);
-          });
-          btn.classList.remove.apply(btn.classList, INACTIVE);
-          btn.classList.add.apply(btn.classList, ACTIVE);
-        });
-      })();
-    </script>
 
-    <section id="matrix-region">
-      {% include "_matrix_region.html" %}
-    </section>
+    <details id="anhang-details" class="group">
+      <summary class="cursor-pointer list-none flex items-center justify-between rounded-lg border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        <span>Anhang — Marktübersicht, Karte und Apartments im Detail</span>
+        <span class="text-base group-open:rotate-180 transition-transform">▾</span>
+      </summary>
+      <div class="mt-4">
+        {# --- Umkreis-Schalter: eigene Karte, klar als Hauptsteuerung markiert --- #}
+        <section class="mb-6 rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3.5">
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div class="shrink-0">
+              <div class="text-[10px] uppercase tracking-[0.12em] text-blue-700 font-semibold">
+                Auswertungs-Umkreis
+              </div>
+              <div class="text-[11px] text-blue-700/80 mt-0.5">
+                wechselt die Detail-Ansichten unten — das Memo oben basiert immer auf dem Heimmarkt
+              </div>
+            </div>
+            <nav id="umkreis-nav" class="flex gap-2 flex-wrap" aria-label="Umkreis">
+              {% for r in search_config.band_radii_km %}
+                <button type="button"
+                        hx-get="/matrix?config_id={{ search_config.id }}&radius_km={{ r }}"
+                        hx-target="#matrix-region"
+                        hx-swap="innerHTML"
+                        class="umkreis-btn rounded-lg border-2 px-4 py-2 text-sm font-semibold transition-colors
+                               {% if active_radius == r %}
+                                 border-slate-900 bg-slate-900 text-white shadow-md
+                               {% else %}
+                                 border-slate-200 bg-white text-slate-600 hover:border-slate-400 hover:text-slate-900
+                               {% endif %}">
+                  {{ r }} km
+                </button>
+              {% endfor %}
+            </nav>
+          </div>
+        </section>
+        <script>
+          (function () {
+            var nav = document.getElementById('umkreis-nav');
+            if (!nav) return;
+            var ACTIVE = ['border-slate-900', 'bg-slate-900', 'text-white', 'shadow-md'];
+            var INACTIVE = ['border-slate-200', 'bg-white', 'text-slate-600', 'hover:border-slate-400', 'hover:text-slate-900'];
+            nav.addEventListener('click', function (ev) {
+              var btn = ev.target.closest('.umkreis-btn');
+              if (!btn || !nav.contains(btn)) return;
+              nav.querySelectorAll('.umkreis-btn').forEach(function (b) {
+                b.classList.remove.apply(b.classList, ACTIVE);
+                b.classList.add.apply(b.classList, INACTIVE);
+              });
+              btn.classList.remove.apply(btn.classList, INACTIVE);
+              btn.classList.add.apply(btn.classList, ACTIVE);
+            });
+          })();
+        </script>
+
+        <section id="matrix-region">
+          {% include "_matrix_region.html" %}
+        </section>
+      </div>
+    </details>
 
     {% if latest_run and latest_run.status != 'completed' %}
       <footer class="mt-10 border-t border-slate-200 pt-3 text-xs text-slate-500">
