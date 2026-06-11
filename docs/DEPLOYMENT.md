@@ -45,6 +45,22 @@ curl -s localhost:8000/health                  # {"status":"ok"} erwarten
 
 ## Daten aktualisieren
 
+### Automatisch (Daten-Uhr, Standard-Pfad seit 2026-06-11)
+
+Ein launchd-LaunchAgent auf dem Dev-Mac crawlt **Mo + Do 07:00** und synct
+bei Erfolg automatisch zum VPS (Dump → scp → TRUNCATE+Restore). Manuelles
+Crawlen + Dump/Restore (unten) bleibt als Fallback.
+
+- Skript: `scripts/scheduled_crawl.sh` (Log: `~/Library/Logs/airbi/crawl-<stamp>.log`)
+- plist-Template: `scripts/com.airbi.crawl.plist` (Pfade auf diesen Mac
+  hartkodiert — auf einem anderen Rechner ProgramArguments + Log-Pfade anpassen)
+- Installation:
+  `cp scripts/com.airbi.crawl.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.airbi.crawl.plist`
+- Sofort-Lauf zum Testen: `launchctl kickstart gui/$(id -u)/com.airbi.crawl`
+- Deinstallation: `launchctl bootout gui/$(id -u)/com.airbi.crawl`
+- Fehler melden sich als macOS-Benachrichtigung („AirBI Daten-Uhr"); ein
+  abgebrochener Crawl wird vom nächsten Lauf automatisch resumiert.
+
 **Einmalig nach Migration `b2c3d4e5f6a7`** — Umkreis-Felder der Config setzen:
 ```sql
 UPDATE search_config SET center_lat=38.7391, center_lng=-9.1048,
@@ -68,7 +84,9 @@ Der Crawl läuft **nicht** auf dem Server (braucht Residential-IP). Neue Daten k
 PGPASSWORD=airbi pg_dump --data-only --no-owner --no-privileges -h localhost -U airbi -d airbi \
   -t search_config -t crawl_run -t listing -t snapshot -f /tmp/airbi-data.sql
 scp /tmp/airbi-data.sql deploy@labs.remoterepublic.com:/tmp/
-# auf dem Server (Prod-DB ggf. vorher leeren, je nach Strategie)
+# auf dem Server: vor dem Restore IMMER die vier Tabellen leeren
+# (TRUNCATE search_config, crawl_run, listing, snapshot CASCADE;)
+# — sonst Duplicate-Key-Fehler; die Daten-Uhr macht das automatisch
 ssh deploy@labs.remoterepublic.com 'cd /opt/airbi && set -a; . .env; set +a; \
   PGPASSWORD=$(echo "$DATABASE_URL" | sed -E "s|.*://airbi:([^@]+)@.*|\1|") \
   psql -h localhost -U airbi -d airbi -f /tmp/airbi-data.sql; rm -f /tmp/airbi-data.sql'
@@ -82,7 +100,7 @@ ssh deploy@labs.remoterepublic.com 'cd /opt/airbi && set -a; . .env; set +a; \
 
 ## Bewusst (noch) NICHT auf dem Server
 
-- APScheduler-Auto-Crawl, Backup-Cron, Monitoring/Alerting.
+- Backup-Cron, Monitoring/Alerting. (Auto-Crawl läuft seit 2026-06-11 als launchd-Job auf dem Dev-Mac — bewusst kein APScheduler im Server-Prozess.)
 - Residential-Proxy + Crawl-Topologie (Crawl bleibt Dev-Rechner).
 - Playwright-Browser-Binaries (Server crawlt nicht).
 - CI/CD, Staging.
