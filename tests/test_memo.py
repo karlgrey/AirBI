@@ -252,3 +252,13 @@ def test_memo_texts_have_no_internal_jargon():
     for text in texts:
         for term in JARGON_BLACKLIST:
             assert term.lower() not in text.lower(), f"Jargon '{term}' in: {text}"
+
+
+def test_build_memo_survives_anchor_with_zero_segment_score():
+    """Anker-Segment ohne Bewertungen (Score 0.0) darf keinen Crash und
+    keinen Prozent-Vergleich erzeugen."""
+    anchors = [AnchorStats(name="Totes Viertel", radius_km=1.0, listing_count=40,
+                           segment_n=5, segment_score=0.0, segment_adr=90.0)]
+    memo = build_memo(_home_matrix(), anchors, data_age_days=2)
+    ch2 = memo.chapters[1].plain_text
+    assert "Totes Viertel" not in ch2 or "%" not in ch2

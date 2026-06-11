@@ -268,7 +268,7 @@ def build_memo(
                 f"— der Heimmarkt hat {phrase}, typisch für eine junge Lage "
                 f"mit Raum für neue Anbieter."
             )))
-    chapters.append(MemoChapter("01", "Der Markt vor Ort", frags))
+    chapters.append(MemoChapter(f"{len(chapters) + 1:02d}", "Der Markt vor Ort", frags))
 
     # ---- Kapitel 2: Wo die Nachfrage hinläuft ------------------------
     verb = (
@@ -279,10 +279,10 @@ def build_memo(
     frags = [Fragment("text", f"{size_label} im {lux}-Segment {verb}:")]
     median = _median_cell_score(home_matrix)
     chip = f"{_fmt_score(bcell.score)} Bewertungen je Apartment"
-    if median and median > 0:
+    if median is not None and median > 0:
         chip += f" — {bcell.score / median:.1f}× des lokalen Medians"
     frags.append(Fragment("chip", chip))
-    scored = [a for a in anchors if a.segment_score is not None]
+    scored = [a for a in anchors if a.segment_score is not None and a.segment_score > 0]
     if scored:
         frags.append(Fragment("text", "Dieselbe Klasse erreicht in"))
         for a in scored:
@@ -294,7 +294,7 @@ def build_memo(
             f"Vergleichsmarkts, bei deutlich weniger Wettbewerbern "
             f"({bcell.n} gegenüber {strongest.segment_n})."
         )))
-    chapters.append(MemoChapter("02", "Wo die Nachfrage hinläuft", frags))
+    chapters.append(MemoChapter(f"{len(chapters) + 1:02d}", "Wo die Nachfrage hinläuft", frags))
 
     # ---- Kapitel 3: Die Alternative (nur mit Lücken-Fund) -------------
     gap = home_matrix.gap_cell
