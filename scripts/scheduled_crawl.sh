@@ -66,3 +66,4 @@ fi
 rm -f "$DUMP"
 echo "=== Fertig: Crawl + Sync ok ==="
 notify "Crawl + Sync erfolgreich"
+exit 0

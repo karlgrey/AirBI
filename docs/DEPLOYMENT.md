@@ -52,7 +52,8 @@ bei Erfolg automatisch zum VPS (Dump → scp → TRUNCATE+Restore). Manuelles
 Crawlen + Dump/Restore (unten) bleibt als Fallback.
 
 - Skript: `scripts/scheduled_crawl.sh` (Log: `~/Library/Logs/airbi/crawl-<stamp>.log`)
-- plist-Template: `scripts/com.airbi.crawl.plist`
+- plist-Template: `scripts/com.airbi.crawl.plist` (Pfade auf diesen Mac
+  hartkodiert — auf einem anderen Rechner ProgramArguments + Log-Pfade anpassen)
 - Installation:
   `cp scripts/com.airbi.crawl.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.airbi.crawl.plist`
 - Sofort-Lauf zum Testen: `launchctl kickstart gui/$(id -u)/com.airbi.crawl`
@@ -83,7 +84,9 @@ Der Crawl läuft **nicht** auf dem Server (braucht Residential-IP). Neue Daten k
 PGPASSWORD=airbi pg_dump --data-only --no-owner --no-privileges -h localhost -U airbi -d airbi \
   -t search_config -t crawl_run -t listing -t snapshot -f /tmp/airbi-data.sql
 scp /tmp/airbi-data.sql deploy@labs.remoterepublic.com:/tmp/
-# auf dem Server (Prod-DB ggf. vorher leeren, je nach Strategie)
+# auf dem Server: vor dem Restore IMMER die vier Tabellen leeren
+# (TRUNCATE search_config, crawl_run, listing, snapshot CASCADE;)
+# — sonst Duplicate-Key-Fehler; die Daten-Uhr macht das automatisch
 ssh deploy@labs.remoterepublic.com 'cd /opt/airbi && set -a; . .env; set +a; \
   PGPASSWORD=$(echo "$DATABASE_URL" | sed -E "s|.*://airbi:([^@]+)@.*|\1|") \
   psql -h localhost -U airbi -d airbi -f /tmp/airbi-data.sql; rm -f /tmp/airbi-data.sql'
