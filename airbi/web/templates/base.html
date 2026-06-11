@@ -36,6 +36,7 @@
         var dataEl = document.getElementById('airbi-map-data');
         var panel = document.getElementById('map-detail');
         if (!mapEl || !dataEl || !panel || typeof L === 'undefined') return;
+        if (!mapEl.offsetWidth && !mapEl.offsetHeight) return;
         var data;
         try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
         if (!data || !data.center) return;
@@ -141,7 +142,21 @@
       };
 
       // Initial-Load und nach jedem HTMX-Swap re-init.
-      document.addEventListener('DOMContentLoaded', window.initAirbiMap);
+      document.addEventListener('DOMContentLoaded', function () {
+        window.initAirbiMap();
+        var anhang = document.getElementById('anhang-details');
+        if (anhang) {
+          anhang.addEventListener('toggle', function () {
+            if (anhang.open) {
+              if (window.AIRBI_MAP_INSTANCE) {
+                window.AIRBI_MAP_INSTANCE.invalidateSize();
+              } else {
+                window.initAirbiMap();
+              }
+            }
+          });
+        }
+      });
       document.body.addEventListener('htmx:afterSettle', window.initAirbiMap);
     </script>
   </body>
