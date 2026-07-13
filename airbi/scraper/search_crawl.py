@@ -329,6 +329,30 @@ def extract_results_and_cursors(stays_data: dict | None) -> tuple[list, list]:
     return search_results, page_cursors
 
 
+def fetch_with_retry(
+    fetch,
+    *,
+    retries: int = 2,
+    on_retry=None,
+) -> tuple[list, list]:
+    """Ruft ``fetch()`` auf und wiederholt bei leerem Ergebnis bis zu ``retries``-mal.
+
+    Ein transienter Fehlschlag (Timeout, Netz-Hickser) auf Seite 1 einer Box hat
+    bisher die GANZE Box gekostet (02./06.07.2026: bis zu 3 von 5 Boxen verloren).
+    ``on_retry(attempt)`` wird vor jedem Wiederholungsversuch gerufen — Ort für
+    Logging und Delay des Aufrufers.
+    """
+    results: list = []
+    cursors: list = []
+    for attempt in range(retries + 1):
+        results, cursors = fetch()
+        if results or cursors:
+            return results, cursors
+        if attempt < retries and on_retry is not None:
+            on_retry(attempt + 1)
+    return results, cursors
+
+
 def run_search_crawl(
     session: "Session",
     search_config: "SearchConfig",
@@ -471,8 +495,17 @@ def run_search_crawl(
                 base_search_url = _search_url(box)
                 parsed_in_box: dict[str, ParsedListing] = {}
 
-                first_results, page_cursors = _fetch_search_page(
-                    page, base_search_url, 1
+                def _on_page1_retry(attempt: int, _box=box_idx) -> None:
+                    logger.info(
+                        "Box %d: Seite 1 leer/fehlgeschlagen — Retry %d.",
+                        _box, attempt,
+                    )
+                    human_delay(*DEFAULT_PAGE_DELAY)
+
+                first_results, page_cursors = fetch_with_retry(
+                    lambda: _fetch_search_page(page, base_search_url, 1),
+                    retries=2,
+                    on_retry=_on_page1_retry,
                 )
 
                 if not first_results and not page_cursors:

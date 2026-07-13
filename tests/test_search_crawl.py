@@ -200,3 +200,52 @@ def test_extract_results_survives_json_null_at_every_level():
         results, cursors = extract_results_and_cursors(stays_data)
         assert results == [], f"results nicht leer für {stays_data!r}"
         assert cursors == [], f"cursors nicht leer für {stays_data!r}"
+
+
+# ---------------------------------------------------------------------------
+# fetch_with_retry — transienter Seite-1-Fehlschlag darf die Box nicht kosten
+# (Snapshot-Rückgang 02./06.07.2026: Timeouts auf Seite 1 → ganze Boxen verloren)
+# ---------------------------------------------------------------------------
+
+def test_fetch_with_retry_returns_first_success():
+    from airbi.scraper.search_crawl import fetch_with_retry
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        if len(calls) < 3:
+            return [], []
+        return [{"id": "x"}], ["c1"]
+
+    results, cursors = fetch_with_retry(fetch, retries=2)
+    assert len(calls) == 3
+    assert results == [{"id": "x"}]
+    assert cursors == ["c1"]
+
+
+def test_fetch_with_retry_gives_up_after_retries():
+    from airbi.scraper.search_crawl import fetch_with_retry
+    calls = []
+    retried = []
+
+    def fetch():
+        calls.append(1)
+        return [], []
+
+    results, cursors = fetch_with_retry(fetch, retries=2, on_retry=retried.append)
+    assert len(calls) == 3
+    assert retried == [1, 2]
+    assert (results, cursors) == ([], [])
+
+
+def test_fetch_with_retry_success_on_first_try_does_not_retry():
+    from airbi.scraper.search_crawl import fetch_with_retry
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return [{"id": "y"}], []
+
+    results, _ = fetch_with_retry(fetch, retries=2)
+    assert len(calls) == 1
+    assert results == [{"id": "y"}]
