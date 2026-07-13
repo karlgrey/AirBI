@@ -166,3 +166,37 @@ def test_persist_results_writes_amenities_and_amenity_score(db_session):
     assert listing.description == "Loft mit Blick"
     assert listing.amenity_score is not None and 0.0 <= listing.amenity_score <= 1.0
     assert listing.amenity_score > 0.2
+
+
+# ---------------------------------------------------------------------------
+# extract_results_and_cursors — None-Sicherheit gegen Airbnb-JSON-null
+# (Regression: Run 19 vom 13.07.2026 starb an `"staysSearch": null`)
+# ---------------------------------------------------------------------------
+
+def test_extract_results_happy_path():
+    from airbi.scraper.search_crawl import extract_results_and_cursors
+    stays_data = {"data": {"presentation": {"staysSearch": {"results": {
+        "searchResults": [{"id": "x"}],
+        "paginationInfo": {"pageCursors": ["c1", "c2"]},
+    }}}}}
+    results, cursors = extract_results_and_cursors(stays_data)
+    assert results == [{"id": "x"}]
+    assert cursors == ["c1", "c2"]
+
+
+def test_extract_results_survives_json_null_at_every_level():
+    from airbi.scraper.search_crawl import extract_results_and_cursors
+    cases = [
+        None,
+        {},
+        {"data": None},
+        {"data": {"presentation": None}},
+        {"data": {"presentation": {"staysSearch": None}}},          # Crash-Fall 13.07.
+        {"data": {"presentation": {"staysSearch": {"results": None}}}},
+        {"data": {"presentation": {"staysSearch": {"results": {
+            "searchResults": None, "paginationInfo": None}}}}},
+    ]
+    for stays_data in cases:
+        results, cursors = extract_results_and_cursors(stays_data)
+        assert results == [], f"results nicht leer für {stays_data!r}"
+        assert cursors == [], f"cursors nicht leer für {stays_data!r}"

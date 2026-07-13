@@ -308,6 +308,27 @@ def refresh_details(
     return updated
 
 
+def extract_results_and_cursors(stays_data: dict | None) -> tuple[list, list]:
+    """Liest searchResults + pageCursors None-sicher aus einer StaysSearch-Antwort.
+
+    Airbnb liefert vereinzelt Antworten, in denen Zwischenknoten als JSON-``null``
+    stehen (z. B. ``"staysSearch": null``) — verkettete ``.get(key, {})`` schützen
+    dagegen nicht, weil das Default nur bei FEHLENDEM Schlüssel greift. Eine solche
+    Seite wird als leer behandelt (Aufrufer überspringt sie), statt den Lauf zu
+    crashen (Regression: Run 19, 13.07.2026).
+    """
+    results = (
+        ((((stays_data or {}).get("data") or {})
+          .get("presentation") or {})
+         .get("staysSearch") or {})
+        .get("results") or {}
+    )
+    search_results = results.get("searchResults") or []
+    pagination = results.get("paginationInfo") or {}
+    page_cursors = pagination.get("pageCursors") or []
+    return search_results, page_cursors
+
+
 def run_search_crawl(
     session: "Session",
     search_config: "SearchConfig",
@@ -409,23 +430,9 @@ def run_search_crawl(
             logger.warning("Seite %d: StaysSearch-JSON nicht gefunden.", page_num)
             return [], []
 
-        search_results = (
-            stays_data
-            .get("data", {})
-            .get("presentation", {})
-            .get("staysSearch", {})
-            .get("results", {})
-            .get("searchResults", [])
-        )
-        page_cursors = (
-            stays_data
-            .get("data", {})
-            .get("presentation", {})
-            .get("staysSearch", {})
-            .get("results", {})
-            .get("paginationInfo", {})
-            .get("pageCursors", [])
-        )
+        search_results, page_cursors = extract_results_and_cursors(stays_data)
+        if not search_results and not page_cursors:
+            logger.warning("Seite %d: StaysSearch-Antwort ohne Ergebnisse (null-Knoten?).", page_num)
         return search_results, page_cursors
 
     try:
