@@ -47,4 +47,7 @@ def browser_context(
         try:
             yield context
         finally:
-            context.close()
+            try:
+                context.close()
+            except Exception:  # noqa: BLE001 — Browser evtl. schon tot (Watchdog-Kill)
+                pass

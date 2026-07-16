@@ -189,6 +189,11 @@ _MAX_PAGES = 20  # Schutz gegen Endlosschleifen
 
 _REFRESH_BATCH_SIZE = 50  # Browser nach so vielen Listings frisch starten (Hang-Schutz)
 
+# Harte Obergrenze pro Listing (goto 30 s + Settle 4 s + Parse; Evaluate hat
+# KEIN eigenes Timeout — Vorfall 16.07.2026: JS-Endlosschleife hielt den
+# Crawl 7 h bei Refresh 69/639 fest). Watchdog killt dann den Browser.
+_REFRESH_HARD_TIMEOUT_S = 90
+
 
 def refresh_details(
     session: "Session",
@@ -217,6 +222,7 @@ def refresh_details(
     from airbi.scraper.browser import browser_context
     from airbi.scraper.pacing import DEFAULT_PAGE_DELAY, human_delay
     from airbi.scraper.parser import parse_listing_detail
+    from airbi.scraper.watchdog import hard_deadline, kill_profile_browsers
 
     # Letzten completed Run dieser Config finden.
     stmt = (
@@ -265,12 +271,13 @@ def refresh_details(
                 )
                 detail_url = f"https://www.airbnb.com/rooms/{listing.airbnb_id}"
                 try:
-                    page.goto(detail_url, timeout=30_000, wait_until="domcontentloaded")
-                    page.wait_for_timeout(4_000)
-                    blobs = page.eval_on_selector_all(
-                        "script[id^='data-deferred-state']",
-                        "els => els.map(e => e.textContent)",
-                    )
+                    with hard_deadline(_REFRESH_HARD_TIMEOUT_S, kill_profile_browsers):
+                        page.goto(detail_url, timeout=30_000, wait_until="domcontentloaded")
+                        page.wait_for_timeout(4_000)
+                        blobs = page.eval_on_selector_all(
+                            "script[id^='data-deferred-state']",
+                            "els => els.map(e => e.textContent)",
+                        )
                     if blobs:
                         payload = json.loads(blobs[0])
                         detail = parse_listing_detail(payload)
@@ -301,6 +308,12 @@ def refresh_details(
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Refresh für %s fehlgeschlagen: %s", listing.airbnb_id, exc)
                     session.rollback()
+                    if page.is_closed():
+                        logger.warning(
+                            "Browser tot (Watchdog/Absturz) — Batch abgebrochen, "
+                            "Rest kommt beim nächsten Batch/Lauf dran (Resume).",
+                        )
+                        break
                 human_delay(*DEFAULT_PAGE_DELAY)
 
     logger.info("Detail-Refresh fertig: %d/%d Listings aktualisiert (skip %d)",
