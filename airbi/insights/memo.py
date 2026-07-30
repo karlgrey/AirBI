@@ -22,6 +22,7 @@ from airbi.insights.segment_matrix import (
     build_segment_matrix,
     compute_segment_matrix,
 )
+from airbi.insights.velocity import attach_velocities
 
 # Teil-3-Hook (Velocity-Modul): solange False, formuliert Kapitel 2 im
 # Bestand ("hat gesammelt"); mit True wechselt es auf Buchungs-Trend.
@@ -69,6 +70,10 @@ class AnchorStats:
     segment_n: int = 0
     segment_score: float | None = None
     segment_adr: float | None = None
+    # Velocity (Teilprojekt 3): Ø wöchentliche Review-Zunahme im Segment,
+    # analog zu segment_score, nur belastbar wenn segment_velocity_n groß genug.
+    segment_velocity: float | None = None
+    segment_velocity_n: int = 0
 
 
 @dataclass
@@ -138,8 +143,10 @@ def _load_rows_for_center(
                 beds=listing.beds,
                 max_guests=listing.max_guests,
                 is_superhost=bool(listing.is_superhost),
+                listing_id=listing.id,
             )
         )
+    attach_velocities(session, rows)
     return rows
 
 
@@ -176,6 +183,8 @@ def compute_anchor_stats(
         stats.segment_n = cell.n
         stats.segment_score = cell.score
         stats.segment_adr = float(cell.adr) if cell.adr is not None else None
+        stats.segment_velocity = cell.velocity
+        stats.segment_velocity_n = cell.velocity_n
     return stats
 
 
@@ -188,6 +197,10 @@ def _fmt_score(score: float) -> str:
     return f"{score:.0f}"
 
 
+def _fmt_velocity(velocity: float) -> str:
+    return f"{velocity:.1f}"
+
+
 def _median_cell_score(matrix: SegmentMatrix) -> float | None:
     scores = sorted(
         c.score for c in matrix.cells.values() if c.score is not None and c.n > 0
@@ -198,6 +211,19 @@ def _median_cell_score(matrix: SegmentMatrix) -> float | None:
     if len(scores) % 2:
         return scores[mid]
     return (scores[mid - 1] + scores[mid]) / 2
+
+
+def _median_cell_velocity(matrix: SegmentMatrix) -> float | None:
+    velocities = sorted(
+        c.velocity for c in matrix.cells.values()
+        if c.velocity is not None and c.velocity_n > 0
+    )
+    if not velocities:
+        return None
+    mid = len(velocities) // 2
+    if len(velocities) % 2:
+        return velocities[mid]
+    return (velocities[mid - 1] + velocities[mid]) / 2
 
 
 def _density_phrase(home_count: int, home_radius_km: float, anchor: AnchorStats) -> str:
@@ -278,33 +304,62 @@ def build_memo(
     chapters.append(MemoChapter(f"{len(chapters) + 1:02d}", "Der Markt vor Ort", frags))
 
     # ---- Kapitel 2: Wo die Nachfrage hinläuft ------------------------
+    # Teil-3-Weiche: Bestand (Ø Bewertungen je Apartment, kumuliert) vs.
+    # Trend (Ø wöchentliche Bewertungs-Zunahme) — real, sobald die Best-Cell
+    # genug Listings mit belastbarem Velocity-Signal hat (home_matrix.velocity_
+    # available bzw. der übergebene Flag). Fällt defensiv auf Bestand zurück,
+    # wenn der Flag zwar True ist, die Best-Cell aber (noch) kein Signal hat.
+    use_velocity = velocity_available and bcell.velocity is not None
     verb = (
         "wird aktuell am stärksten gebucht"
-        if velocity_available
+        if use_velocity
         else "hat je Apartment die meisten Bewertungen gesammelt"
     )
     frags = [Fragment("text", f"{size_label} im {lux}-Segment {verb}:")]
-    median = _median_cell_score(home_matrix)
-    chip = f"{_fmt_score(bcell.score)} Bewertungen je Apartment"
-    if median is not None and median > 0:
-        chip += f" — {bcell.score / median:.1f}× des lokalen Medians"
+    if use_velocity:
+        median_v = _median_cell_velocity(home_matrix)
+        chip = f"{_fmt_velocity(bcell.velocity)} Bewertungen/Woche je Apartment"
+        if median_v is not None and median_v > 0:
+            chip += f" — {bcell.velocity / median_v:.1f}× des lokalen Medians"
+    else:
+        median = _median_cell_score(home_matrix)
+        chip = f"{_fmt_score(bcell.score)} Bewertungen je Apartment"
+        if median is not None and median > 0:
+            chip += f" — {bcell.score / median:.1f}× des lokalen Medians"
     frags.append(Fragment("chip", chip))
-    scored = [
-        a for a in anchors
-        if a.segment_score is not None
-        and a.segment_score > 0
-        and a.segment_n >= home_matrix.min_sample
-    ]
+
+    if use_velocity:
+        scored = [
+            a for a in anchors
+            if a.segment_velocity is not None
+            and a.segment_velocity > 0
+            and a.segment_velocity_n >= home_matrix.min_sample
+        ]
+    else:
+        scored = [
+            a for a in anchors
+            if a.segment_score is not None
+            and a.segment_score > 0
+            and a.segment_n >= home_matrix.min_sample
+        ]
     if scored:
         frags.append(Fragment("text", "Dieselbe Klasse erreicht in"))
         for i, a in enumerate(scored):
+            value = a.segment_velocity if use_velocity else a.segment_score
+            fmt_value = _fmt_velocity(value) if use_velocity else _fmt_score(value)
             if i == 0:
-                chip_text = f"{a.name}: {_fmt_score(a.segment_score)} Bewertungen je Apartment"
+                unit = " Bewertungen/Woche je Apartment" if use_velocity else " Bewertungen je Apartment"
+                chip_text = f"{a.name}: {fmt_value}{unit}"
             else:
-                chip_text = f"{a.name}: {_fmt_score(a.segment_score)}"
+                chip_text = f"{a.name}: {fmt_value}"
             frags.append(Fragment("chip_muted", chip_text))
-        strongest = max(scored, key=lambda a: a.segment_score)
-        ratio = bcell.score / strongest.segment_score
+        own_value = bcell.velocity if use_velocity else bcell.score
+        strongest = max(
+            scored,
+            key=lambda a: a.segment_velocity if use_velocity else a.segment_score,
+        )
+        strongest_value = strongest.segment_velocity if use_velocity else strongest.segment_score
+        ratio = own_value / strongest_value
         if ratio > 1.0:
             closing = (
                 f"— der Heimmarkt liegt damit beim {ratio:.1f}-Fachen von {strongest.name}."
@@ -433,4 +488,8 @@ def compute_memo(
         anchors,
         data_age_days=_data_age_days(crawl_run),
         al_zone_status=search_config.al_zone_status,
+        # Teil-3-Hook (vormals VELOCITY_AVAILABLE=False fest verdrahtet):
+        # jetzt real aus der Snapshot-Historie der Best-Cell abgeleitet
+        # (siehe SegmentMatrix.velocity_available in segment_matrix.py).
+        velocity_available=home_matrix.velocity_available,
     )

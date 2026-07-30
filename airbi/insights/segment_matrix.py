@@ -21,6 +21,7 @@ from airbi.classification.luxury import LUXURY_CLASSES, luxury_class as _luxury_
 from airbi.classification.price import price_percentile as _price_percentile
 from airbi.db.models import CrawlRun, Listing, SearchConfig, Snapshot
 from airbi.geo.distance import haversine_km
+from airbi.insights.velocity import attach_velocities
 
 # Reihenfolge bestimmt die Render-Reihenfolge in der Matrix.
 SIZE_CLASSES: list[str] = ["Studio", "1BR", "2BR", "3BR+"]
@@ -55,6 +56,12 @@ class ListingRow:
     beds: int | None = None
     max_guests: int | None = None
     is_superhost: bool = False
+    # Velocity-Anbindung (Teilprojekt 3): listing_id ist die interne DB-PK,
+    # nur für den Velocity-Lookup gebraucht (compute_segment_matrix füllt
+    # sie; reine Fixtures/Tests lassen sie None). weekly_velocity wird von
+    # airbi.insights.velocity.attach_velocities in-place gesetzt.
+    listing_id: int | None = None
+    weekly_velocity: float | None = None
 
 
 @dataclass
@@ -69,6 +76,10 @@ class Cell:
     adr: Decimal | None = None         # Median-Nacht-Preis der Zelle
     is_thin: bool = True               # N < min_sample
     heat: int = 0                      # 0-4, relativ zum besten nicht-dünnen Score
+    # Velocity (Teilprojekt 3): Ø wöchentliche Review-Zunahme der Listings in
+    # der Zelle, die ein belastbares Signal haben (siehe airbi.insights.velocity).
+    velocity: float | None = None
+    velocity_n: int = 0                # wie viele Listings der Zelle liefern ein Signal
 
 
 @dataclass
@@ -187,6 +198,10 @@ class SegmentMatrix:
     listing_count: int = 0
     review_rate: float = DEFAULT_INSIGHT_CONFIG["review_rate"]
     min_sample: int = DEFAULT_INSIGHT_CONFIG["min_sample"]
+    # Teil-3-Hook, jetzt real berechnet (statt der Konstante in memo.py):
+    # True, wenn die Best-Cell genug Listings mit belastbarem Velocity-Signal
+    # hat (>= min_sample). compute_memo liest dies statt VELOCITY_AVAILABLE.
+    velocity_available: bool = False
 
     def cell(self, size_class: str, luxury_class: str) -> Cell:
         """Template-freundlicher Zugriff (Jinja kann keine Tuple-Subscripts)."""
@@ -542,6 +557,9 @@ def build_segment_matrix(
             Decimal(median(prices)).quantize(Decimal("1")) if prices else None
         )
         cell.is_thin = cell.n < min_sample
+        velocities = [r.weekly_velocity for r in group if r.weekly_velocity is not None]
+        cell.velocity_n = len(velocities)
+        cell.velocity = sum(velocities) / len(velocities) if velocities else None
 
     # Best-Cell: höchster Score unter den nicht-dünnen Zellen.
     eligible = [
@@ -567,6 +585,9 @@ def build_segment_matrix(
         listing_count=listing_count,
         review_rate=float(cfg["review_rate"]),
         min_sample=min_sample,
+    )
+    matrix.velocity_available = bool(
+        best_cell is not None and cells[best_cell].velocity_n >= min_sample
     )
     matrix.recommendation = _build_recommendation(matrix)
     matrix.top_performers = _pick_top_performers(
@@ -653,8 +674,14 @@ def compute_segment_matrix(
                         beds=listing.beds,
                         max_guests=listing.max_guests,
                         is_superhost=bool(listing.is_superhost),
+                        listing_id=listing.id,
                     )
                 )
+
+    # Velocity (Teilprojekt 3): über die GESAMTE Snapshot-Historie der
+    # betroffenen Listings, nicht nur den aktuellen Run — die Zeitreihe ist
+    # der Punkt. Mutiert `rows` in-place (weekly_velocity).
+    attach_velocities(session, rows)
 
     matrix = build_segment_matrix(
         rows,

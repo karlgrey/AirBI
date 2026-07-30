@@ -50,7 +50,8 @@ def test_segment_matrix_cell_lookup_returns_stored_cell():
 
 
 def _row(airbnb_id, size_class, price, review_count, rating=4.5, amenity_score=0.0,
-         amenities=None, bedrooms=None, beds=None, max_guests=None, is_superhost=False):
+         amenities=None, bedrooms=None, beds=None, max_guests=None, is_superhost=False,
+         weekly_velocity=None):
     return ListingRow(
         airbnb_id=airbnb_id, title=f"L{airbnb_id}", url=f"https://x/{airbnb_id}",
         size_class=size_class,
@@ -58,7 +59,7 @@ def _row(airbnb_id, size_class, price, review_count, rating=4.5, amenity_score=0
         review_count=review_count, rating=rating, amenity_score=amenity_score,
         amenities=list(amenities or []),
         bedrooms=bedrooms, beds=beds, max_guests=max_guests,
-        is_superhost=is_superhost,
+        is_superhost=is_superhost, weekly_velocity=weekly_velocity,
     )
 
 
@@ -161,6 +162,55 @@ def test_builder_heat_scales_1_to_4_for_eligible_cells():
     assert 1 <= matrix.cell("Studio", "Budget").heat <= 4
     assert 1 <= matrix.cell("1BR", "Budget").heat <= 4
     assert matrix.cell("Studio", "Budget").heat < matrix.cell("2BR", "Budget").heat
+
+
+def test_builder_aggregates_cell_velocity_from_rows_with_signal():
+    rows = [
+        _row("1", "1BR", 100, 10, weekly_velocity=4.0),
+        _row("2", "1BR", 100, 20, weekly_velocity=6.0),
+        _row("3", "1BR", 100, 30, weekly_velocity=None),  # kein Signal -> nicht gezählt
+    ]
+    matrix = _build(rows, config={"min_sample": 1})
+    cell = matrix.cell("1BR", "Budget")
+    assert cell.velocity_n == 2
+    assert cell.velocity == 5.0  # Ø aus 4.0 und 6.0
+
+
+def test_builder_cell_velocity_none_when_no_row_has_signal():
+    rows = [_row("1", "1BR", 100, 10)]
+    matrix = _build(rows, config={"min_sample": 1})
+    cell = matrix.cell("1BR", "Budget")
+    assert cell.velocity_n == 0
+    assert cell.velocity is None
+
+
+def test_builder_velocity_available_true_when_best_cell_has_enough_signal():
+    rows = [
+        _row("1", "1BR", 100, 10, weekly_velocity=4.0),
+        _row("2", "1BR", 100, 12, weekly_velocity=5.0),
+        _row("3", "1BR", 100, 14, weekly_velocity=6.0),
+    ]
+    matrix = _build(rows, config={"min_sample": 3})
+    assert matrix.best_cell == ("1BR", "Budget")
+    assert matrix.velocity_available is True
+
+
+def test_builder_velocity_available_false_when_best_cell_signal_below_min_sample():
+    rows = [
+        _row("1", "1BR", 100, 10, weekly_velocity=4.0),  # nur 1 von 3 mit Signal
+        _row("2", "1BR", 100, 12),
+        _row("3", "1BR", 100, 14),
+    ]
+    matrix = _build(rows, config={"min_sample": 3})
+    assert matrix.best_cell == ("1BR", "Budget")
+    assert matrix.velocity_available is False
+
+
+def test_builder_velocity_available_false_without_best_cell():
+    rows = [_row("1", "1BR", 100, 5, weekly_velocity=4.0)]
+    matrix = _build(rows, config={"min_sample": 3})
+    assert matrix.best_cell is None
+    assert matrix.velocity_available is False
 
 
 def test_recommendation_names_umkreis_size_tier_score_n_adr_and_proxy_note():
@@ -561,6 +611,55 @@ def test_latest_completed_run_returns_none_when_no_completed_run(db_session):
     db_session.add(CrawlRun(search_config=cfg, status="failed"))
     db_session.flush()
     assert latest_completed_run(db_session, cfg) is None
+
+
+def test_compute_segment_matrix_attaches_velocity_from_snapshot_history(db_session):
+    """compute_segment_matrix soll ListingRow.weekly_velocity aus der GESAMTEN
+    Snapshot-Historie (nicht nur dem aktuellen Run) befuellen und daraus
+    cell.velocity/matrix.velocity_available ableiten."""
+    from datetime import datetime, timedelta
+
+    cfg, run_new = _seed_run(db_session)
+    cfg.classification_config = {"min_sample": 1}
+    run_old = CrawlRun(search_config=cfg, status="completed",
+                       started_at=datetime(2026, 6, 1))
+    db_session.add(run_old)
+    db_session.flush()
+
+    listing = Listing(
+        airbnb_id="V1", city_slug="lisboa", lat=38.7391, lng=-9.1048,
+        size_class="1BR", title="LV1", url="https://x/V1",
+    )
+    # Zweites Listing (gleicher Preis -> gleiche Zelle), ohne Historie: nur
+    # ein Snapshot -> kein Velocity-Signal, muss aber die Kohorte fuellen,
+    # damit price_percentile ueberhaupt eine Zelle vergibt (>= 2 Preise).
+    listing2 = Listing(
+        airbnb_id="V2", city_slug="lisboa", lat=38.7391, lng=-9.1048,
+        size_class="1BR", title="LV2", url="https://x/V2",
+    )
+    db_session.add_all([listing, listing2])
+    db_session.flush()
+    db_session.add(Snapshot(
+        listing_id=listing.id, crawl_run_id=run_old.id,
+        captured_at=datetime(2026, 6, 1), price=Decimal("100"), review_count=10,
+    ))
+    db_session.add(Snapshot(
+        listing_id=listing.id, crawl_run_id=run_new.id,
+        captured_at=datetime(2026, 6, 1) + timedelta(days=28),
+        price=Decimal("100"), review_count=38,  # +28 in 28 Tagen -> 7/Woche
+    ))
+    db_session.add(Snapshot(
+        listing_id=listing2.id, crawl_run_id=run_new.id,
+        captured_at=datetime(2026, 6, 1) + timedelta(days=28),
+        price=Decimal("100"), review_count=5,
+    ))
+    db_session.flush()
+
+    matrix = compute_segment_matrix(db_session, cfg, 2.0, run_new)
+    cell = matrix.cell(*matrix.best_cell)
+    assert cell.velocity == 7.0
+    assert cell.velocity_n == 1
+    assert matrix.velocity_available is True
 
 
 def test_compute_segment_matrix_filters_by_radius_and_run(db_session):

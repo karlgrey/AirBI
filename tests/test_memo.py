@@ -117,6 +117,44 @@ def test_compute_anchor_stats_segment_uses_local_cohort(db_session):
     assert stats.segment_n >= 1               # das 300er-Listing ist lokal Luxury
 
 
+def test_compute_anchor_stats_reports_segment_velocity_from_history(db_session):
+    """compute_anchor_stats soll segment_velocity aus der Snapshot-Historie der
+    Anker-Listings befuellen (Teilprojekt 3) -- nicht nur den Bestands-Score."""
+    from datetime import datetime, timedelta
+
+    cfg = SearchConfig(name="Anker-Velocity-Test", city_slug="lisboa",
+                       center_lat=38.7390, center_lng=-9.1044,
+                       classification_config={"min_sample": 1})
+    db_session.add(cfg)
+    db_session.flush()
+    run_old = CrawlRun(search_config_id=cfg.id, status="completed",
+                       started_at=datetime(2026, 6, 1))
+    db_session.add(run_old)
+    db_session.flush()
+    run_new = CrawlRun(search_config_id=cfg.id, status="completed",
+                       started_at=datetime(2026, 6, 1) + timedelta(days=28))
+    db_session.add(run_new)
+    db_session.flush()
+
+    a1 = _mk_listing(db_session, "va1", 38.714, -9.128)
+    a2 = _mk_listing(db_session, "va2", 38.715, -9.127)
+    db_session.add(Snapshot(listing_id=a1.id, crawl_run_id=run_old.id,
+                            captured_at=datetime(2026, 6, 1),
+                            price=Decimal("100"), review_count=10))
+    db_session.add(Snapshot(listing_id=a1.id, crawl_run_id=run_new.id,
+                            captured_at=datetime(2026, 6, 1) + timedelta(days=28),
+                            price=Decimal("100"), review_count=38))  # 7/Woche
+    db_session.add(Snapshot(listing_id=a2.id, crawl_run_id=run_new.id,
+                            captured_at=datetime(2026, 6, 1) + timedelta(days=28),
+                            price=Decimal("100"), review_count=5))   # kein Verlauf
+    db_session.flush()
+
+    market = {"name": "Alfama/Graça", "lat": 38.714, "lng": -9.128, "radius_km": 1.2}
+    stats = compute_anchor_stats(db_session, cfg, run_new, market, segment=("1BR", "Budget"))
+    assert stats.segment_velocity == 7.0
+    assert stats.segment_velocity_n == 1
+
+
 # ---------------------------------------------------------------------------
 # Task 4: Kapitel-Generator build_memo + Jargon-Vertrag
 # ---------------------------------------------------------------------------
@@ -125,11 +163,11 @@ from airbi.insights.segment_matrix import build_segment_matrix, ListingRow
 from airbi.insights.memo import build_memo
 
 
-def _row(airbnb_id, size_class, price, review_count):
+def _row(airbnb_id, size_class, price, review_count, weekly_velocity=None):
     return ListingRow(
         airbnb_id=airbnb_id, title=f"L{airbnb_id}", url=f"https://x/{airbnb_id}",
         size_class=size_class, price=Decimal(str(price)),
-        review_count=review_count, rating=4.8,
+        review_count=review_count, rating=4.8, weekly_velocity=weekly_velocity,
     )
 
 
@@ -154,6 +192,33 @@ def _anchors():
                     segment_n=30, segment_score=52.0, segment_adr=120.0),
         AnchorStats(name="Parque das Nações", radius_km=1.5, listing_count=150,
                     segment_n=12, segment_score=41.0, segment_adr=110.0),
+    ]
+
+
+def _home_matrix_with_velocity():
+    """Wie _home_matrix, aber die Best-Cell (1BR) hat auf allen drei Zeilen
+    ein Velocity-Signal -> velocity_n=3 >= min_sample(3)."""
+    rows = [
+        _row("h1", "1BR", 100, 40, weekly_velocity=4.0),
+        _row("h2", "1BR", 100, 35, weekly_velocity=6.0),
+        _row("h3", "1BR", 100, 45, weekly_velocity=5.0),
+        _row("h4", "2BR", 200, 5), _row("h5", "2BR", 210, 8), _row("h6", "2BR", 190, 2),
+        _row("h7", "Studio", 60, 1),
+    ]
+    return build_segment_matrix(
+        rows, config={}, radius_km=2.0,
+        center_label="R. Cap. Leitão 86", crawl_run_id=1,
+    )
+
+
+def _anchors_with_velocity():
+    return [
+        AnchorStats(name="Alfama/Graça", radius_km=1.2, listing_count=240,
+                    segment_n=30, segment_score=52.0, segment_adr=120.0,
+                    segment_velocity=3.0, segment_velocity_n=10),
+        AnchorStats(name="Parque das Nações", radius_km=1.5, listing_count=150,
+                    segment_n=12, segment_score=41.0, segment_adr=110.0,
+                    segment_velocity=2.0, segment_velocity_n=5),
     ]
 
 
@@ -199,6 +264,43 @@ def test_build_memo_chapter2_stock_wording_without_velocity():
     memo = build_memo(_home_matrix(), _anchors(), data_age_days=2)
     ch2 = memo.chapters[1].plain_text
     assert "gesammelt" in ch2          # Bestands-Formulierung (Teil-3-Weiche)
+
+
+def test_build_memo_chapter2_trend_wording_and_velocity_chip_when_available():
+    memo = build_memo(
+        _home_matrix_with_velocity(), _anchors_with_velocity(),
+        data_age_days=2, velocity_available=True,
+    )
+    ch2 = memo.chapters[1]
+    assert "wird aktuell am stärksten gebucht" in ch2.plain_text
+    assert "gesammelt" not in ch2.plain_text
+    chips = [f for f in ch2.fragments if f.kind == "chip"]
+    assert any("Bewertungen/Woche je Apartment" in c.text for c in chips)
+    # 5.0 = Ø(4.0, 6.0, 5.0) der Best-Cell-Zeilen.
+    assert any("5.0" in c.text for c in chips)
+
+
+def test_build_memo_chapter2_velocity_anchor_comparison_when_available():
+    memo = build_memo(
+        _home_matrix_with_velocity(), _anchors_with_velocity(),
+        data_age_days=2, velocity_available=True,
+    )
+    ch2 = memo.chapters[1]
+    muted = [f for f in ch2.fragments if f.kind == "chip_muted"]
+    assert any("Alfama/Graça" in m.text and "Bewertungen/Woche" in m.text for m in muted)
+    # Heimmarkt-Velocity (5.0) liegt über beiden Ankern (3.0 / 2.0).
+    assert "-Fachen" in ch2.plain_text or "%" in ch2.plain_text
+
+
+def test_build_memo_chapter2_falls_back_to_stock_when_velocity_flag_true_but_no_signal():
+    """velocity_available=True, aber die Best-Cell selbst hat kein Signal
+    (z.B. Grenzfall/Datenlücke) -> Chip faellt defensiv auf den Bestands-Wert
+    zurueck statt eine leere/None-Velocity zu zeigen."""
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2, velocity_available=True)
+    ch2 = memo.chapters[1]
+    chips = [f for f in ch2.fragments if f.kind == "chip"]
+    assert any("Bewertungen je Apartment" in c.text for c in chips)
+    assert not any("Bewertungen/Woche" in c.text for c in chips)
 
 
 def test_build_memo_risk_chapter_names_age_proxy_and_al():
