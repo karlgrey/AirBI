@@ -460,3 +460,42 @@ def test_dashboard_renders_memo_with_anchor_chips(client, db_session):
     assert resp.status_code == 200
     assert "Investment-Memo" in resp.text
     assert "Wo die Nachfrage hinläuft" in resp.text
+
+
+def test_dashboard_commits_recommendation_run(client, db_session):
+    """Regression (#151, Deploy 12.08.): get_session() schließt ohne Commit —
+    ohne expliziten Commit in der Route wird der recommendation_run-Insert
+    aus compute_memo beim Request-Ende verworfen und die Empfehlungs-Historie
+    bleibt für immer leer (Changelog/Hysterese ohne Wirkung)."""
+    from sqlalchemy import func, select
+
+    from airbi.db.models import RecommendationRun
+
+    _seed_marvila(db_session)
+    # _seed_marvila hält alle Zellen dünn (max. 2 je Zelle) — eine Zelle auf
+    # min_sample (3) bringen, damit das Memo eine Best-Cell hat und
+    # compute_memo überhaupt persistiert.
+    run = db_session.execute(select(CrawlRun)).scalars().first()
+    listing = Listing(
+        airbnb_id="M5", city_slug="lisboa", district_slug=None,
+        lat=38.7395, lng=-9.1050, property_type="Apartment", bedrooms=1,
+        size_class="1BR", title="Marvila Cosy 1BR Nr 3", url="https://x/M5",
+    )
+    db_session.add(listing)
+    db_session.flush()
+    db_session.add(Snapshot(
+        listing_id=listing.id, crawl_run_id=run.id,
+        price=Decimal("65"), review_count=7, rating=4.7,
+    ))
+    db_session.flush()
+
+    response = client.get("/")
+    assert response.status_code == 200
+
+    # Rollback verwirft alles, was die Route nur geflusht (nicht committet)
+    # hätte — der Datensatz muss den Rollback überleben.
+    db_session.rollback()
+    count = db_session.execute(
+        select(func.count()).select_from(RecommendationRun)
+    ).scalar()
+    assert count == 1

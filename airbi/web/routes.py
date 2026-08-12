@@ -117,6 +117,12 @@ def dashboard(
         compute_memo(session, search_config, completed_run)
         if completed_run is not None else None
     )
+    if memo is not None:
+        # compute_memo persistiert die Empfehlung dieses Laufs (Changelog +
+        # Hysterese, #151) — get_session() schließt ohne Commit, deshalb muss
+        # die Route committen, sonst wird der Insert beim close() verworfen
+        # und die Historie bleibt für immer leer.
+        session.commit()
     latest_run_date_de = _format_date_de(latest_run.started_at) if latest_run else None
     city_label = "Lissabon" if search_config.city_slug == "lisboa" else search_config.city_slug
     return templates.TemplateResponse(
