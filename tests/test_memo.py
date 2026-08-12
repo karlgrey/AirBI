@@ -16,7 +16,36 @@ from airbi.insights.memo import (
 
 def test_confidence_belastbar_needs_velocity_fresh_data_and_sample():
     assert compute_confidence(
-        data_age_days=3, n=5, min_sample=3, velocity_available=True
+        data_age_days=3, n=5, min_sample=3, velocity_available=True, multiplier=1.5,
+    ) == CONFIDENCE_BELASTBAR
+
+
+def test_confidence_downgrades_to_solide_when_multiplier_below_threshold():
+    """Memo-Review 11.08.2026: 1,1x Median ist nahe am Rauschen -- selbst mit
+    frischen Daten und Velocity-Signal reicht das nicht für 'belastbar'."""
+    assert compute_confidence(
+        data_age_days=3, n=5, min_sample=3, velocity_available=True, multiplier=1.1,
+    ) == CONFIDENCE_SOLIDE
+
+
+def test_confidence_belastbar_boundary_multiplier_exactly_at_threshold():
+    assert compute_confidence(
+        data_age_days=3, n=5, min_sample=3, velocity_available=True, multiplier=1.3,
+    ) == CONFIDENCE_BELASTBAR
+
+
+def test_confidence_missing_multiplier_does_not_qualify_for_belastbar():
+    """Ohne Multiplikator-Angabe kann die Zusatzbedingung nicht geprüft
+    werden -- konservativ auf 'solide Indizien' statt unbelegt 'belastbar'."""
+    assert compute_confidence(
+        data_age_days=3, n=5, min_sample=3, velocity_available=True, multiplier=None,
+    ) == CONFIDENCE_SOLIDE
+
+
+def test_confidence_multiplier_threshold_is_configurable():
+    assert compute_confidence(
+        data_age_days=3, n=5, min_sample=3, velocity_available=True,
+        multiplier=1.25, min_multiplier=1.2,
     ) == CONFIDENCE_BELASTBAR
 
 
@@ -311,6 +340,22 @@ def test_build_memo_risk_chapter_names_age_proxy_and_al():
     assert "AL-Lizenz" in risk         # ungeprüft (al_zone_status=None)
 
 
+def test_build_memo_risk_chapter_uses_singular_for_one_day():
+    """Kleinbug (Memo-Review 11.08.2026): 'Der Datenstand ist 1 Tage alt'
+    muss Singular 'Tag' verwenden."""
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=1)
+    risk = memo.chapters[-1].plain_text
+    assert "1 Tag alt" in risk
+    assert "1 Tage alt" not in risk
+
+
+def test_build_memo_risk_chapter_uses_plural_for_zero_and_many_days():
+    memo0 = build_memo(_home_matrix(), _anchors(), data_age_days=0)
+    assert "0 Tage alt" in memo0.chapters[-1].plain_text
+    memo9 = build_memo(_home_matrix(), _anchors(), data_age_days=9)
+    assert "9 Tage alt" in memo9.chapters[-1].plain_text
+
+
 def test_build_memo_risk_chapter_skips_al_when_zone_known():
     memo = build_memo(_home_matrix(), _anchors(), data_age_days=2,
                       al_zone_status="ABSORCAO")
@@ -508,3 +553,251 @@ def test_compute_memo_falls_back_to_smallest_band_radius(db_session):
     memo = compute_memo(db_session, cfg, run)
     assert memo.home_radius_km == 1.0
     assert memo.anchors == []
+
+
+# ---------------------------------------------------------------------------
+# Task 1+2 (Memo-Review 11.08.2026): Empfehlungs-Changelog + Hysterese
+# ---------------------------------------------------------------------------
+
+from datetime import datetime
+
+from airbi.insights.recommendation_history import RecommendationEntry
+
+_RAW_SEGMENT = _home_matrix().best_cell   # ("1BR", <luxury_class>) -- die rohe Best-Cell
+_OTHER_SEGMENT = ("2BR", "Mid" if _RAW_SEGMENT[1] != "Mid" else "Budget")
+
+
+def _history_entry(crawl_run_id, run_date, raw, displayed=None):
+    displayed = displayed or raw
+    return RecommendationEntry(
+        crawl_run_id=crawl_run_id, run_date=run_date,
+        raw_size_class=raw[0], raw_luxury_class=raw[1],
+        displayed_size_class=displayed[0], displayed_luxury_class=displayed[1],
+    )
+
+
+def test_build_memo_without_history_has_no_changelog():
+    """Erster Lauf ohne Vergleichswert -- kein Changelog-Abschnitt, keine
+    stille Vorspiegelung von Kontinuität."""
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2)
+    assert memo.changelog is None
+
+
+def test_build_memo_changelog_confirms_unchanged_recommendation():
+    history = [_history_entry(1, datetime(2026, 8, 5), _RAW_SEGMENT)]
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2, history=history)
+    assert memo.changelog is not None
+    text = memo.changelog.plain_text
+    assert "geändert" not in text
+    assert "unverändert" in text
+
+
+def test_build_memo_changelog_flags_explicit_switch_after_hysteresis_confirms():
+    """Herausforderer (= aktuelle rohe Best-Cell) war schon im vorigen Lauf
+    roh vorn -> Streak 2 erreicht Default-Schwelle -> Wechsel, explizit im
+    Changelog ausgewiesen (Kern von Task 1: kein stiller Wechsel mehr)."""
+    history = [
+        _history_entry(1, datetime(2026, 7, 30), _OTHER_SEGMENT),
+        _history_entry(2, datetime(2026, 8, 5), _RAW_SEGMENT, displayed=_OTHER_SEGMENT),
+    ]
+    memo = build_memo(
+        _home_matrix(), _anchors(), data_age_days=2, history=history,
+        run_date=datetime(2026, 8, 10),
+    )
+    # Die Empfehlung wechselt jetzt tatsächlich auf die rohe Best-Cell:
+    from airbi.insights.segment_matrix import _size_klartext
+    assert memo.verdict_size_label == _size_klartext(_RAW_SEGMENT[0])
+    assert memo.verdict_luxury_class == _RAW_SEGMENT[1]
+    assert memo.changelog is not None
+    text = memo.changelog.plain_text
+    assert "geändert am 10.08.2026" in text
+    assert _size_klartext(_OTHER_SEGMENT[0]) in text
+    assert _size_klartext(_RAW_SEGMENT[0]) in text
+    assert "Grund" in text
+
+
+def test_build_memo_holds_previous_recommendation_with_challenger_note():
+    """Herausforderer erst 1 Lauf lang roh vorn (< Default N=2) -> die alte
+    Empfehlung bleibt Verdict UND bestimmt Kapitel 2/4, nur ein
+    Herausforderer-Hinweis erscheint im Changelog."""
+    history = [_history_entry(1, datetime(2026, 8, 5), _OTHER_SEGMENT)]
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2, history=history)
+    from airbi.insights.segment_matrix import _size_klartext
+    assert memo.verdict_size_label == _size_klartext(_OTHER_SEGMENT[0])
+    assert memo.verdict_luxury_class == _OTHER_SEGMENT[1]
+    assert memo.changelog is not None
+    text = memo.changelog.plain_text
+    assert "geändert" not in text
+    assert "Herausforderer" in text
+    assert _size_klartext(_RAW_SEGMENT[0]) in text
+    assert "seit 1 Lauf" in text
+
+
+def test_build_memo_hysteresis_n_is_configurable():
+    """hysteresis_n=1 -> sofortiger Wechsel wie ohne Hysterese."""
+    history = [_history_entry(1, datetime(2026, 8, 5), _OTHER_SEGMENT)]
+    memo = build_memo(
+        _home_matrix(), _anchors(), data_age_days=2, history=history, hysteresis_n=1,
+        run_date=datetime(2026, 8, 10),
+    )
+    assert memo.verdict_luxury_class == _RAW_SEGMENT[1]
+    assert "geändert am 10.08.2026" in memo.changelog.plain_text
+
+
+def test_build_memo_exposes_raw_segment_and_metrics_for_persistence():
+    """compute_memo braucht die ROHEN Werte (unabhängig von der Hysterese-
+    Haltung), um record_recommendation() aufzurufen."""
+    history = [_history_entry(1, datetime(2026, 8, 5), _OTHER_SEGMENT)]
+    memo = build_memo(_home_matrix(), _anchors(), data_age_days=2, history=history)
+    assert memo.raw_verdict_size_class == _RAW_SEGMENT[0]
+    assert memo.raw_verdict_luxury_class == _RAW_SEGMENT[1]
+    assert memo.raw_score is not None
+    assert memo.raw_multiplier is not None
+
+
+# ---------------------------------------------------------------------------
+# Task 3 (Memo-Review 11.08.2026): Vertrauensstufe an Multiplikator gekoppelt
+# ---------------------------------------------------------------------------
+
+
+def test_build_memo_confidence_downgrades_when_multiplier_too_low():
+    """1,1x Median (Kapitel-2-Chip) darf trotz frischer Daten + Velocity
+    nicht 'belastbar' ergeben."""
+    memo = build_memo(
+        _home_matrix_with_velocity(), _anchors_with_velocity(),
+        data_age_days=2, velocity_available=True,
+    )
+    # 5.0 / Median(2.0,3.0) je nach Zellen -> in diesem Fixture liegt der
+    # Multiplikator weit über der Schwelle, siehe Gegentest unten für den
+    # Downgrade-Fall über eine explizite min_confidence_multiplier-Anhebung.
+    memo_high_bar = build_memo(
+        _home_matrix_with_velocity(), _anchors_with_velocity(),
+        data_age_days=2, velocity_available=True, min_confidence_multiplier=100.0,
+    )
+    assert memo_high_bar.confidence != CONFIDENCE_BELASTBAR
+    assert memo_high_bar.confidence == CONFIDENCE_SOLIDE
+
+
+def test_build_memo_confidence_reason_names_multiplier_gap_in_risk_chapter():
+    memo = build_memo(
+        _home_matrix_with_velocity(), _anchors_with_velocity(),
+        data_age_days=2, velocity_available=True, min_confidence_multiplier=100.0,
+    )
+    risk = memo.chapters[-1].plain_text
+    assert "belastbar" in risk
+    assert "100" in risk or "100.0" in risk
+
+
+# ---------------------------------------------------------------------------
+# compute_memo-Integration: Changelog + Hysterese über echte CrawlRuns
+# ---------------------------------------------------------------------------
+
+from airbi.db.models import RecommendationRun
+
+
+def _mk_run_with_listings(session, cfg, run_id_prefix, started_at, size_class, bedrooms, n=4):
+    run = CrawlRun(search_config_id=cfg.id, status="completed", started_at=started_at)
+    session.add(run)
+    session.flush()
+    for i in range(n):
+        listing = _mk_listing(
+            session, f"{run_id_prefix}-{i}", 38.7390 + i * 0.0003, -9.1044,
+            size_class=size_class, bedrooms=bedrooms,
+        )
+        session.add(Snapshot(listing_id=listing.id, crawl_run_id=run.id,
+                             price=Decimal("100"), review_count=30))
+    session.flush()
+    return run
+
+
+def _mk_two_segment_run(session, cfg, run_id_prefix, started_at, *, one_br_reviews, two_br_reviews, n=4):
+    """Ein CrawlRun mit BEIDEN Segmenten (1BR und 2BR) belegt -- damit ein
+    'Wechsel der roh stärksten Zelle' zwischen Läufen simuliert werden kann,
+    ohne dass das jeweils andere Segment auf n=0 fällt (das würde die
+    Hysterese-Fallback-Logik für 'Segment aus der Matrix verschwunden'
+    auslösen, nicht den normalen Wechsel-Pfad)."""
+    run = CrawlRun(search_config_id=cfg.id, status="completed", started_at=started_at)
+    session.add(run)
+    session.flush()
+    for i in range(n):
+        listing = _mk_listing(session, f"{run_id_prefix}-1br-{i}", 38.7390 + i * 0.0003, -9.1044,
+                              size_class="1BR", bedrooms=1)
+        session.add(Snapshot(listing_id=listing.id, crawl_run_id=run.id,
+                             price=Decimal("100"), review_count=one_br_reviews))
+    for i in range(n):
+        listing = _mk_listing(session, f"{run_id_prefix}-2br-{i}", 38.7395 + i * 0.0003, -9.1044,
+                              size_class="2BR", bedrooms=2)
+        session.add(Snapshot(listing_id=listing.id, crawl_run_id=run.id,
+                             price=Decimal("150"), review_count=two_br_reviews))
+    session.flush()
+    return run
+
+
+def test_compute_memo_persists_recommendation_idempotently(db_session):
+    cfg = SearchConfig(name="Memo-Persist-Test", city_slug="lisboa",
+                       center_lat=38.7390, center_lng=-9.1044, home_radius_km=2.0)
+    db_session.add(cfg)
+    db_session.flush()
+    run = _mk_run_with_listings(db_session, cfg, "p", datetime(2026, 8, 10), "1BR", 1)
+
+    compute_memo(db_session, cfg, run)
+    compute_memo(db_session, cfg, run)   # Dashboard-Reload -- kein Doppel-Eintrag
+
+    rows = db_session.query(RecommendationRun).filter_by(search_config_id=cfg.id).all()
+    assert len(rows) == 1
+
+
+def test_compute_memo_holds_then_switches_recommendation_across_runs(db_session):
+    """End-to-End über drei CrawlRuns: Lauf 1 setzt 1BR (stärker), Lauf 2
+    dreht das Kräfteverhältnis (2BR roh vorn, aber erst 1x) -> Empfehlung
+    bleibt 1BR mit Herausforderer-Hinweis, Lauf 3 bestätigt 2BR ein zweites
+    Mal in Folge -> expliziter Wechsel."""
+    cfg = SearchConfig(
+        name="Memo-Hysterese-E2E", city_slug="lisboa",
+        center_lat=38.7390, center_lng=-9.1044, home_radius_km=2.0,
+    )
+    db_session.add(cfg)
+    db_session.flush()
+
+    run1 = _mk_two_segment_run(db_session, cfg, "r1", datetime(2026, 7, 30),
+                               one_br_reviews=40, two_br_reviews=5)
+    memo1 = compute_memo(db_session, cfg, run1)
+    assert memo1.verdict_size_class == "1BR"
+    assert memo1.changelog is None   # erster Lauf, kein Vergleichswert
+
+    run2 = _mk_two_segment_run(db_session, cfg, "r2", datetime(2026, 8, 5),
+                               one_br_reviews=30, two_br_reviews=45)
+    memo2 = compute_memo(db_session, cfg, run2)
+    assert memo2.verdict_size_class == "1BR"        # gehalten
+    assert memo2.raw_verdict_size_class == "2BR"     # aber roh bereits vorn
+    assert memo2.changelog is not None
+    assert "Herausforderer" in memo2.changelog.plain_text
+    assert "geändert" not in memo2.changelog.plain_text
+
+    run3 = _mk_two_segment_run(db_session, cfg, "r3", datetime(2026, 8, 10),
+                               one_br_reviews=30, two_br_reviews=50)
+    memo3 = compute_memo(db_session, cfg, run3)
+    assert memo3.verdict_size_class == "2BR"
+    assert memo3.changelog is not None
+    assert "geändert am 10.08.2026" in memo3.changelog.plain_text
+
+
+def test_compute_memo_reads_hysteresis_n_from_classification_config(db_session):
+    """hysteresis_n=1 in der SearchConfig -> sofortiger Wechsel, keine
+    Haltephase (Konfigurierbarkeit laut Briefing)."""
+    cfg = SearchConfig(
+        name="Memo-Hysterese-Config-Test", city_slug="lisboa",
+        center_lat=38.7390, center_lng=-9.1044, home_radius_km=2.0,
+        classification_config={"hysteresis_n": 1},
+    )
+    db_session.add(cfg)
+    db_session.flush()
+
+    run1 = _mk_two_segment_run(db_session, cfg, "c1", datetime(2026, 7, 30),
+                               one_br_reviews=40, two_br_reviews=5)
+    compute_memo(db_session, cfg, run1)
+
+    run2 = _mk_two_segment_run(db_session, cfg, "c2", datetime(2026, 8, 5),
+                               one_br_reviews=30, two_br_reviews=45)
+    memo2 = compute_memo(db_session, cfg, run2)
+    assert memo2.verdict_size_class == "2BR"   # sofort gewechselt

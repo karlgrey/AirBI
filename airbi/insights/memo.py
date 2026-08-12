@@ -22,6 +22,14 @@ from airbi.insights.segment_matrix import (
     build_segment_matrix,
     compute_segment_matrix,
 )
+from airbi.insights.recommendation_history import (
+    DEFAULT_HYSTERESIS_N,
+    HysteresisResult,
+    RecommendationEntry,
+    apply_hysteresis,
+    load_recommendation_history,
+    record_recommendation,
+)
 from airbi.insights.velocity import attach_velocities
 
 # Teil-3-Hook (Velocity-Modul): solange False, formuliert Kapitel 2 im
@@ -38,15 +46,33 @@ _CONFIDENCE_DOTS = {
     CONFIDENCE_DUENN: 1,
 }
 
+# Memo-Review 11.08.2026: "belastbar" nur an Datenmenge zu koppeln reicht
+# nicht -- bei z.B. 1,1x Median ist das Signal nahe am Rauschen. Default:
+# das empfohlene Segment muss mindestens das 1,3-Fache des lokalen
+# Zellen-Medians erreichen (Score oder Velocity, je nach Kapitel-2-Weiche).
+DEFAULT_MIN_CONFIDENCE_MULTIPLIER = 1.3
+
 
 def compute_confidence(
-    *, data_age_days: int | None, n: int, min_sample: int, velocity_available: bool
+    *,
+    data_age_days: int | None,
+    n: int,
+    min_sample: int,
+    velocity_available: bool,
+    multiplier: float | None = None,
+    min_multiplier: float = DEFAULT_MIN_CONFIDENCE_MULTIPLIER,
 ) -> str:
-    """Regelbasierte Vertrauens-Stufe (Spec §4)."""
+    """Regelbasierte Vertrauens-Stufe (Spec §4 + Multiplikator-Kopplung
+    Memo-Review 11.08.2026). `multiplier` ist das Vielfache des lokalen
+    Zellen-Medians, das die Empfehlung erreicht -- fehlt es (None), lässt
+    sich die Zusatzbedingung nicht belegen und die Stufe bleibt konservativ
+    bei 'solide Indizien'."""
     if data_age_days is None or n < min_sample:
         return CONFIDENCE_DUENN
     if velocity_available and data_age_days < 7:
-        return CONFIDENCE_BELASTBAR
+        if multiplier is not None and multiplier >= min_multiplier:
+            return CONFIDENCE_BELASTBAR
+        return CONFIDENCE_SOLIDE
     if data_age_days <= 14:
         return CONFIDENCE_SOLIDE
     return CONFIDENCE_DUENN
@@ -102,6 +128,16 @@ class Memo:
     home_matrix: SegmentMatrix | None = None
     anchors: list[AnchorStats] = field(default_factory=list)
     data_age_days: int | None = None
+    # Empfehlungs-Changelog + Hysterese (Memo-Review 11.08.2026, SmartTasks #151):
+    changelog: MemoChapter | None = None            # None = erster Lauf, kein Vergleichswert
+    verdict_size_class: str | None = None            # Roh-Code der ANGEZEIGTEN Empfehlung ("1BR")
+    # Rohes Best-Cell-Segment dieses Laufs — unabhängig von der Hysterese-
+    # Haltung, Basis für den Persistenz-Aufruf in compute_memo.
+    raw_verdict_size_class: str | None = None
+    raw_verdict_luxury_class: str | None = None
+    raw_score: float | None = None                   # Score oder Velocity, je nach Weiche
+    raw_multiplier: float | None = None               # Vielfaches des lokalen Zellen-Medians
+    used_velocity: bool = False                       # welche Metrik raw_score/raw_multiplier meint
 
 
 def _load_rows_for_center(
@@ -226,6 +262,96 @@ def _median_cell_velocity(matrix: SegmentMatrix) -> float | None:
     return (velocities[mid - 1] + velocities[mid]) / 2
 
 
+def _fmt_date(dt: datetime | None) -> str:
+    """Datum für den Changelog-Text: '10.08.2026'."""
+    if dt is None:
+        return "unbekanntem Datum"
+    return dt.strftime("%d.%m.%Y")
+
+
+def _lauf_plural(n: int) -> str:
+    return "Lauf" if n == 1 else "Läufe"
+
+
+def _lauf_dative_plural(n: int) -> str:
+    return "Lauf" if n == 1 else "Läufen"
+
+
+def _segment_metrics(
+    matrix: SegmentMatrix, size: str, lux: str, velocity_available: bool
+) -> tuple[bool, float | None, float | None]:
+    """Liefert (use_velocity, eigener Wert, Vielfaches des lokalen Zellen-
+    Medians) für ein Segment — Basis für Kapitel-2-Chip, Vertrauensstufe UND
+    die persistierten raw_score/raw_multiplier-Felder."""
+    cell = matrix.cell(size, lux)
+    use_velocity = velocity_available and cell.velocity is not None
+    if use_velocity:
+        value = cell.velocity
+        median_value = _median_cell_velocity(matrix)
+    else:
+        value = cell.score
+        median_value = _median_cell_score(matrix)
+    multiplier = (
+        value / median_value
+        if value is not None and median_value is not None and median_value > 0
+        else None
+    )
+    return use_velocity, value, multiplier
+
+
+def _build_changelog(
+    *,
+    size_label: str,
+    lux: str,
+    history: list[RecommendationEntry],
+    hysteresis: HysteresisResult,
+    hysteresis_n: int,
+    run_date: datetime | None,
+) -> MemoChapter | None:
+    """Empfehlungs-Changelog (Memo-Review 11.08.2026, SmartTasks #151): ein
+    Empfehlungswechsel wird explizit ausgewiesen statt still zu passieren.
+    Ohne Historie (erster Lauf) gibt es keinen Vergleichswert -> kein
+    Abschnitt."""
+    if not history:
+        return None
+
+    label_new = f"{size_label} · {lux}"
+
+    if hysteresis.switched:
+        old_label = (
+            f"{_size_klartext(hysteresis.previous_size_class)} · "
+            f"{hysteresis.previous_luxury_class}"
+        )
+        if hysteresis_n == 1:
+            reason = f"{label_new} lag im aktuellen Lauf vorn"
+        else:
+            reason = (
+                f"{label_new} lag {hysteresis_n} {_lauf_plural(hysteresis_n)} "
+                f"in Folge vorn"
+            )
+        text = (
+            f"Empfehlung geändert am {_fmt_date(run_date)}: von {old_label} zu "
+            f"{label_new}. Grund: {reason}."
+        )
+    elif hysteresis.challenger_size_class is not None:
+        challenger_label = (
+            f"{_size_klartext(hysteresis.challenger_size_class)} · "
+            f"{hysteresis.challenger_luxury_class}"
+        )
+        streak = hysteresis.challenger_streak
+        text = (
+            f"Empfehlung unverändert: {label_new}. Herausforderer: "
+            f"{challenger_label}, führt seit {streak} {_lauf_dative_plural(streak)}."
+        )
+    else:
+        text = (
+            f"Empfehlung unverändert seit dem letzten Lauf "
+            f"({_fmt_date(history[-1].run_date)}): {label_new}."
+        )
+
+    return MemoChapter("", "Empfehlungs-Verlauf", [Fragment("text", text)])
+
+
 def _density_phrase(home_count: int, home_radius_km: float, anchor: AnchorStats) -> str:
     import math
     home_area = math.pi * home_radius_km ** 2
@@ -249,9 +375,20 @@ def build_memo(
     data_age_days: int | None,
     al_zone_status: str | None = None,
     velocity_available: bool = VELOCITY_AVAILABLE,
+    history: list[RecommendationEntry] | None = None,
+    hysteresis_n: int = DEFAULT_HYSTERESIS_N,
+    min_confidence_multiplier: float = DEFAULT_MIN_CONFIDENCE_MULTIPLIER,
+    run_date: datetime | None = None,
 ) -> Memo:
     """Erzeugt das Memo aus der fertigen Heimmarkt-Matrix + Anker-Statistik.
-    Ohne Best-Cell schweigt das Memo (kein Urteil, keine Kapitel)."""
+    Ohne Best-Cell schweigt das Memo (kein Urteil, keine Kapitel).
+
+    `history` (älteste → neueste, ohne den aktuellen Lauf) steuert zwei
+    Dinge aus dem Memo-Review 11.08.2026 (SmartTasks #151): die Hysterese
+    (ein neues Segment wird erst nach `hysteresis_n` Läufen in Folge zur
+    angezeigten Empfehlung) und den Changelog-Abschnitt (`Memo.changelog`),
+    der jeden Wechsel explizit ausweist statt ihn still passieren zu
+    lassen."""
     radius = home_matrix.radius_km or 0.0
     center = home_matrix.center_label or "das Zielobjekt"
 
@@ -274,13 +411,45 @@ def build_memo(
             data_age_days=data_age_days,
         )
 
-    size, lux = home_matrix.best_cell
+    history = history or []
+
+    # Rohes Best-Cell-Segment dieses Laufs — unabhängig von der Hysterese-
+    # Haltung, Basis für Persistenz (compute_memo) und Streak-Zählung.
+    raw_size, raw_lux = home_matrix.best_cell
+    raw_use_velocity, raw_value, raw_multiplier = _segment_metrics(
+        home_matrix, raw_size, raw_lux, velocity_available
+    )
+
+    hysteresis = apply_hysteresis(raw_size, raw_lux, history, hysteresis_n=hysteresis_n)
+    size, lux = hysteresis.displayed_size_class, hysteresis.displayed_luxury_class
     bcell = home_matrix.cell(size, lux)
+
+    if bcell.n == 0:
+        # Das gehaltene Segment hat in diesem Lauf keine Wettbewerber mehr
+        # (aus der Matrix verschwunden) — Hysterese kann nichts mehr halten,
+        # zurück auf die rohe Best-Cell. Grenzfall (Datenbruch), kein
+        # normaler Wechsel -> kein Changelog-Eintrag dafür.
+        size, lux = raw_size, raw_lux
+        bcell = home_matrix.cell(size, lux)
+        hysteresis = HysteresisResult(
+            displayed_size_class=size, displayed_luxury_class=lux, switched=False
+        )
+        history = []  # unterdrückt den Changelog-Abschnitt für diesen Grenzfall
+
     size_label = _size_klartext(size)
+    use_velocity, own_value, multiplier = _segment_metrics(
+        home_matrix, size, lux, velocity_available
+    )
     confidence = compute_confidence(
         data_age_days=data_age_days, n=bcell.n,
         min_sample=home_matrix.min_sample,
-        velocity_available=velocity_available,
+        velocity_available=use_velocity,
+        multiplier=multiplier,
+        min_multiplier=min_confidence_multiplier,
+    )
+    changelog = _build_changelog(
+        size_label=size_label, lux=lux, history=history, hysteresis=hysteresis,
+        hysteresis_n=hysteresis_n, run_date=run_date,
     )
 
     chapters: list[MemoChapter] = []
@@ -309,23 +478,19 @@ def build_memo(
     # genug Listings mit belastbarem Velocity-Signal hat (home_matrix.velocity_
     # available bzw. der übergebene Flag). Fällt defensiv auf Bestand zurück,
     # wenn der Flag zwar True ist, die Best-Cell aber (noch) kein Signal hat.
-    use_velocity = velocity_available and bcell.velocity is not None
+    # use_velocity/own_value/multiplier bereits oben via _segment_metrics
+    # berechnet (auch Basis für die Vertrauensstufe, Task 3).
     verb = (
         "wird aktuell am stärksten gebucht"
         if use_velocity
         else "hat je Apartment die meisten Bewertungen gesammelt"
     )
     frags = [Fragment("text", f"{size_label} im {lux}-Segment {verb}:")]
-    if use_velocity:
-        median_v = _median_cell_velocity(home_matrix)
-        chip = f"{_fmt_velocity(bcell.velocity)} Bewertungen/Woche je Apartment"
-        if median_v is not None and median_v > 0:
-            chip += f" — {bcell.velocity / median_v:.1f}× des lokalen Medians"
-    else:
-        median = _median_cell_score(home_matrix)
-        chip = f"{_fmt_score(bcell.score)} Bewertungen je Apartment"
-        if median is not None and median > 0:
-            chip += f" — {bcell.score / median:.1f}× des lokalen Medians"
+    unit = " Bewertungen/Woche je Apartment" if use_velocity else " Bewertungen je Apartment"
+    fmt_own = _fmt_velocity(own_value) if use_velocity else _fmt_score(own_value)
+    chip = f"{fmt_own}{unit}"
+    if multiplier is not None:
+        chip += f" — {multiplier:.1f}× des lokalen Medians"
     frags.append(Fragment("chip", chip))
 
     if use_velocity:
@@ -404,7 +569,8 @@ def build_memo(
     rate_pct = int(round(home_matrix.review_rate * 100))
     frags = []
     if data_age_days is not None:
-        age_text = f"Der Datenstand ist {data_age_days} Tage alt."
+        day_word = "Tag" if data_age_days == 1 else "Tage"
+        age_text = f"Der Datenstand ist {data_age_days} {day_word} alt."
         if data_age_days > 14:
             age_text += " Das ist zu alt für ein belastbares Urteil — ein frischer Datenlauf steht aus."
         frags.append(Fragment("text", age_text))
@@ -429,6 +595,28 @@ def build_memo(
             f"Die Stichprobe im empfohlenen Segment ist mit {bcell.n} Apartments "
             f"überschaubar — einzelne Ausreißer können das Bild verschieben."
         )))
+    # Vertrauensstufen-Begründung (Task 3, Memo-Review 11.08.2026): greift
+    # genau dann, wenn Datenmenge + Frische für "belastbar" gereicht hätten,
+    # der Multiplikator gegenüber dem lokalen Median aber zu gering war.
+    if (
+        use_velocity
+        and confidence != CONFIDENCE_BELASTBAR
+        and data_age_days is not None
+        and data_age_days < 7
+        and bcell.n >= home_matrix.min_sample
+    ):
+        if multiplier is not None:
+            frags.append(Fragment("text", (
+                f"Die Nachfrage im empfohlenen Segment liegt beim {multiplier:.1f}-fachen "
+                f"des lokalen Medians — für die Vertrauensstufe belastbar wäre "
+                f"mindestens das {min_confidence_multiplier:.1f}-fache nötig, deshalb "
+                f"bleibt es vorerst bei solide Indizien."
+            )))
+        else:
+            frags.append(Fragment("text", (
+                "Der Vergleich zum lokalen Median lässt sich für dieses Segment nicht "
+                "bilden, deshalb bleibt es vorerst bei solide Indizien statt belastbar."
+            )))
     if confidence == CONFIDENCE_DUENN:
         frags.append(Fragment("text", (
             "Insgesamt ist die Datenlage dünn; dieses Memo ist als erster "
@@ -447,6 +635,13 @@ def build_memo(
         ),
         confidence=confidence,
         confidence_dots=_CONFIDENCE_DOTS[confidence],
+        changelog=changelog,
+        verdict_size_class=size,
+        raw_verdict_size_class=raw_size,
+        raw_verdict_luxury_class=raw_lux,
+        raw_score=raw_value,
+        raw_multiplier=raw_multiplier,
+        used_velocity=raw_use_velocity,
         chapters=chapters,
         home_matrix=home_matrix,
         anchors=anchors,
@@ -470,7 +665,11 @@ def _data_age_days(crawl_run: CrawlRun) -> int | None:
 def compute_memo(
     session: Session, search_config: SearchConfig, crawl_run: CrawlRun
 ) -> Memo:
-    """Memo für eine SearchConfig: Heimmarkt-Matrix + Anker + Kapitel."""
+    """Memo für eine SearchConfig: Heimmarkt-Matrix + Anker + Kapitel.
+
+    Lädt die Empfehlungs-Historie (Changelog + Hysterese, Memo-Review
+    11.08.2026 / SmartTasks #151) und persistiert die Empfehlung dieses
+    Laufs im Anschluss idempotent — je SearchConfig+CrawlRun ein Eintrag."""
     home_radius = search_config.home_radius_km or min(
         search_config.band_radii_km or [2.0]
     )
@@ -483,7 +682,14 @@ def compute_memo(
         )
         for market in (search_config.comparison_markets or [])
     ]
-    return build_memo(
+    insight_config = search_config.classification_config or {}
+    hysteresis_n = int(insight_config.get("hysteresis_n", DEFAULT_HYSTERESIS_N))
+    min_confidence_multiplier = float(
+        insight_config.get("min_confidence_multiplier", DEFAULT_MIN_CONFIDENCE_MULTIPLIER)
+    )
+    history = load_recommendation_history(session, search_config, before_crawl_run=crawl_run)
+
+    memo = build_memo(
         home_matrix,
         anchors,
         data_age_days=_data_age_days(crawl_run),
@@ -492,4 +698,23 @@ def compute_memo(
         # jetzt real aus der Snapshot-Historie der Best-Cell abgeleitet
         # (siehe SegmentMatrix.velocity_available in segment_matrix.py).
         velocity_available=home_matrix.velocity_available,
+        history=history,
+        hysteresis_n=hysteresis_n,
+        min_confidence_multiplier=min_confidence_multiplier,
+        run_date=crawl_run.started_at,
     )
+
+    if home_matrix.best_cell is not None:
+        record_recommendation(
+            session, search_config, crawl_run,
+            raw_size_class=memo.raw_verdict_size_class,
+            raw_luxury_class=memo.raw_verdict_luxury_class,
+            raw_score=memo.raw_score,
+            raw_multiplier=memo.raw_multiplier,
+            used_velocity=memo.used_velocity,
+            displayed_size_class=memo.verdict_size_class,
+            displayed_luxury_class=memo.verdict_luxury_class,
+            confidence=memo.confidence,
+        )
+
+    return memo

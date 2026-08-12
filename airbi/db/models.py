@@ -127,3 +127,39 @@ class Snapshot(Base):
 
     listing: Mapped["Listing"] = relationship(back_populates="snapshots")
     crawl_run: Mapped["CrawlRun"] = relationship(back_populates="snapshots")
+
+
+class RecommendationRun(Base):
+    """Empfehlung eines Memo-Laufs, für Changelog + Hysterese (SmartTasks #151).
+
+    Ein Datensatz je SearchConfig+CrawlRun (idempotent geschrieben von
+    `airbi.insights.recommendation_history.record_recommendation`). `raw_*`
+    ist das rohe Best-Cell-Segment dieses Laufs (ungeglättet); `displayed_*`
+    ist die tatsächlich im Memo gezeigte Empfehlung NACH Hysterese-Filter —
+    beide können während einer Hysterese-Haltephase auseinanderfallen.
+    """
+
+    __tablename__ = "recommendation_run"
+    __table_args__ = (
+        UniqueConstraint(
+            "search_config_id", "crawl_run_id", name="uq_recommendation_run_config_run"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    search_config_id: Mapped[int] = mapped_column(ForeignKey("search_config.id"))
+    crawl_run_id: Mapped[int] = mapped_column(ForeignKey("crawl_run.id"))
+    raw_size_class: Mapped[str] = mapped_column(String(20))
+    raw_luxury_class: Mapped[str] = mapped_column(String(20))
+    raw_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Vielfaches des lokalen Zellen-Medians (Score oder Velocity, je nachdem
+    # was das Memo für dieses Segment anzeigt) — Basis für die
+    # Vertrauensstufen-Kopplung (Task 3, Memo-Review 11.08.2026).
+    raw_multiplier: Mapped[float | None] = mapped_column(Float, nullable=True)
+    used_velocity: Mapped[bool] = mapped_column(Boolean, default=False)
+    displayed_size_class: Mapped[str] = mapped_column(String(20))
+    displayed_luxury_class: Mapped[str] = mapped_column(String(20))
+    confidence: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

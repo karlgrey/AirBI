@@ -28,6 +28,13 @@
       </p>
     </header>
 
+    {# ---------- Empfehlungs-Verlauf (Changelog + Hysterese, SmartTasks #151) ---------- #}
+    {% if memo.changelog %}
+      <p class="mb-6 text-[13px] italic text-slate-500 border-l-2 border-slate-200 pl-3">
+        {{ memo.changelog.fragments[0].text }}
+      </p>
+    {% endif %}
+
     {# ---------- Kapitel ---------- #}
     <div class="space-y-7">
       {% for ch in memo.chapters %}
